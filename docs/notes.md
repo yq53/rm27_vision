@@ -12,8 +12,9 @@
 3. 题1：装甲板识别器（现状）
 4. 代码问答笔记（重点，面试速查）
 5. armor_detector.cpp 实现问答（题1 核心）
-6. 自测清单
-7. 下一步
+6. demo_main.cpp 问答与异常处理（题1 入口）
+7. 自测清单
+8. 下一步
 
 ---
 
@@ -252,9 +253,137 @@ w  = data[2 * num_boxes + i];  h  = data[3 * num_boxes + i];
 
 **数值例子**：原图 1440×1080 → ratio≈0.444，缩到 640×480，pad_h=80。画布检出中心(400,300)宽高(200,100) → 原图 x=(400−100−0)/0.444≈675、y=(300−50−80)/0.444≈383。
 
+### 5.11 `class_id` 的作用（单类时的"有意义死代码"）
+
+- 语义上，检测结果该回答三件事：**在哪（rect）+ 是什么（class_id）+ 多确定（confidence）**，三者构成完整结果。
+- 目前单类永远为 0，demo 也不读它——但**题2 会真正用到**：PnP 解算时不同装甲板（1 号小装甲 / 大装甲 / 前哨站）物理尺寸不同，3D 模型要按类别选，届时靠 `class_id` 决定用哪套尺寸。
+- **已改进**：解析循环现在记录 argmax（`best_class = f - 4`），不再是硬编码 0——单类行为不变，语义从"写死"变成"真的算出了得分最高的类"。
+- 反方观点（可聊）：若确定永远单类，按 YAGNI 原则可删。"为未来预留 vs 不过度设计"是工程平衡题。
+
+### 5.12 `cx / cy` 的 `c` = center（中心）
+
+- YOLO 用**中心点 + 宽高**表示框（训练/损失/解码围绕中心编码），不是"左上角 + 宽高"。
+- 转成 OpenCV 画框坐标：左上角 = `(cx − w/2, cy − h/2)`（还原到原图时再叠加减 pad、除 ratio）。
+
+### 5.13 两种内存排布（下标公式的来由）
+
+两种导出的内存结构**确实不同**，不是同一种排布换写法：
+
+| 排布 | 维度 | 含义 | 取"第 i 框第 f 特征" |
+|---|---|---|---|
+| channel-major | `(1, C, N)` | 行 = 特征：前 N 个全是所有框的 cx，再 N 个 cy…… | `data[f * num_boxes + i]` |
+| (1, N, C) | `(1, N, C)` | 行 = 一个框（每 C 个一组） | `data[i * num_features + f]` |
+
+- 本项目模型导出是 channel-major；部分导出器/版本会输出转置版。
+- 代码先比较 `size[1]/size[2]` 判断排布再选对应公式——**同一份逻辑兼容两种**；写死一种的话换模型就出乱码框。
+- `data[i * num_features + 0]` 里的 `+0`：与 `+1/+2/+3` 对称可读，纯可读性取舍，不是 bug。
+
+### 5.14 单类时 max_score 循环是否多余
+
+- **功能上**：单类（C=5）循环只跑一次 f=4，等价直接取 `data[4 * num_boxes + i]`，确实可以省。
+- **设计上**：它是多类解析的通用骨架——K 类时第 4~4+K−1 行是各类别分数，必须遍历取 max 并记录 argmax。
+- 权衡：保留通用循环（换多类模型不用改）vs 最简写法（当下最清晰）。
+- 本项目保留并顺手升级为 argmax 版本（见 5.11），单类行为不变。
+
 ---
 
-## 6. 自测清单（面试速查）
+## 6. demo_main.cpp 问答与异常处理（题1 入口）
+
+### 6.1 demo_main 的职责与整体串联
+
+- demo_main 是**胶水层**：不含检测算法（在库 armor_detector 里），只组织"一场检测演示"。
+- 流程六步：① 解析命令行参数（默认值 + argc 防越界）→ ② 打开视频（失败 cerr + return -1）→ ③ 加载检测器 + 调阈值（失败抛异常，try-catch 接住）→ ④ 准备输出（建 results/、读视频属性、开 VideoWriter）→ ⑤ 主循环（read → detect → 画框 → 存视频/预览/进度）→ ⑥ 汇总（chrono 计时 + 打印命中率等）。
+- 设计思想：**算法归算法（库）、流程归流程（main）**。题3 接 ROS2 时只写新节点调用库，库一行不改。
+
+### 6.2 命令行参数：`argv/argc` 与 `atoi → stoi`
+
+- `argv[0]` 是程序名，`argv[1]` 起才是参数；`argc` = 参数个数。`(argc > N) ? argv[N] : 默认值` 防止访问不存在的 argv（越界）。
+- `atoi`（ASCII to Integer）：C 风格字符串→int，**遇非数字静默返回 0、不报错**。
+- `stoi`：更现代，**遇非数字抛 `std::invalid_argument`**（比静默更安全，但异常必须被接住，否则照样崩）。配套写法：
+  ```cpp
+  int max_frames = 0;
+  if (argc > 3) {
+      try {
+          max_frames = std::stoi(argv[3]);
+      } catch (const std::invalid_argument&) {
+          std::cerr << "[ERROR] Invalid max_frames argument: " << argv[3] << std::endl;
+          return -1;
+      }
+  }
+  ```
+
+### 6.3 `std::cerr` ≠ 抛异常
+
+| | `std::cerr` | 异常 throw |
+|---|---|---|
+| 本质 | 标准错误输出流（写 stderr） | 错误处理机制（抛对象给上层） |
+| 作用 | 打印文字 | 传递"错误对象" |
+| 后续 | 程序继续 | 没人 catch 就终止 |
+
+- 惯例：正常日志用 `std::cout`（stdout），错误用 `std::cerr`（stderr，重定向时不丢失）。
+- 本代码用"cerr 打印 + return 非0"处理可恢复错误（打不开视频）；"throw"留给构造函数这类"对象无法构造"的严重情况。
+
+### 6.4 `namespace fs = std::filesystem;`（命名空间别名）
+
+- 给已存在的命名空间起短名，`fs::path` ≡ `std::filesystem::path`。
+- `fs::path` 把路径当类型：跨平台分隔符自动处理、支持 `result_dir / "xxx.avi"` 运算符拼接（比字符串拼安全）。
+- 与第 4.5 节区分：那是在"定义"命名空间，这里是"引用"（起别名）。
+
+### 6.5 准备输出块（VideoWriter / fourcc）
+
+- 输出参数全部从**视频文件属性**读（不写死）：`capture.get(CAP_PROP_FRAME_WIDTH/HEIGHT/FPS)`；fps 读到 0（无字段）时退化为 30（防御性设计）。
+- 为什么读：输出视频尺寸/帧率必须和输入一致，否则播放速度/比例错误。
+- `VideoWriter` = VideoCapture 的反向类：把一帧帧 Mat 编码成视频文件。构造函数 4 参数：文件名 / fourcc / fps / Size。
+- **fourcc** = Four Character Code：4 个字符标识一种编码器，`fourcc('M','J','P','G')` = Motion JPEG。`.avi` 配 MJPG / `.mp4` 配 mp4v，后缀要和编码器匹配。MJPG 兼容性好但文件大（帧内压缩）。
+- `isOpened()` 检查：系统不支持编码器时 writer 为空，直接 write 会崩 → 先查，失败就警告跳过存视频。
+
+### 6.6 主循环（统计变量与关键写法）
+
+- `capture.read(frame)`：读一帧 + 返回 bool（读到 true / 结尾 false），比 `>>` 显式。
+- `frames_with_armor` = 有检出的**帧数**（帧级命中率，一帧多个也+1）；`total_detections` = 检出**总个数**。两者语义不同。
+- 先判 `!armors.empty()` 再计数：否则会把"没检出的帧"也计进命中帧。空检测结果是正常情况不是错误。
+- `frame_id % 120 == 0`：每 120 帧存预览 PNG。
+- `cv::format("preview_%04d.png", frame_id)`：OpenCV 版 sprintf；`%04d` = 至少 4 位补零 → 文件名字典序=时间序。
+- `std::max(frame_id, 1)` 防除零（视频一帧都没读到也能安全打印）。
+
+### 6.7 chrono 计时
+
+- `steady_clock`：单调时钟，只增不减、不受系统时间修改影响，专用于测间隔。
+- `end - start` = duration（默认纳秒，单位是编译期属性）。
+- `std::chrono::duration<double, std::milli>(...)`：模板转换——"以 double 表示的毫秒 duration"，单位换算编译期完成，不会写错比例。
+- `.count()`：取出裸数值 → `double elapsed_ms`。
+- 设计动机：duration 类型自带单位，加减换算由编译器检查，杜绝单位写错。
+
+### 6.8 异常接收端语法（catch 形参）
+
+- **throw 抛的是对象**：`throw std::runtime_error("...")` 会构造一个临时对象抛出去；catch 像函数收参一样接它。
+- `catch (const std::invalid_argument&)`：只接 invalid_argument 类型；`const &` = 只读引用（不复制、禁止改）；**没写参数名** = 不需要访问该对象（错误信息自己打印）。
+- `catch (const std::exception& e)`：接**所有标准异常**（exception 是所有标准异常的基类，`runtime_error`/`invalid_argument` 都派生自它）；`e.what()` 取出异常自带的描述文字。
+- **为什么 catch 用引用不用值**：按值接收会**对象切片**（派生类被砍成基类再复制），多态丢失、what() 拿到不完整信息。规范写法永远是 `catch (const T&)`。
+- **catch 顺序**：同一 try 下，派生类（具体）写在前面、基类（兜底）写在最后，否则基类会截胡。
+
+### 6.9 已应用的修复（异常处理落地）
+
+1. **模型加载 try-catch + unique_ptr**：构造函数可能 throw，原来没人接。修复：
+   ```cpp
+   std::unique_ptr<ArmorDetector> detector;   // 指针在 try 外声明
+   try {
+       detector = std::make_unique<ArmorDetector>(model_path);
+   } catch (const std::exception& e) {
+       std::cerr << "[ERROR] Failed to load model: " << model_path << std::endl;
+       std::cerr << "        reason: " << e.what() << std::endl;
+       return -1;
+   }
+   ```
+   - 为什么 unique_ptr：对象要活过整个 main（主循环要用），而 try 块内局部对象块结束即销毁 → 堆上构造 + 智能指针管理生命周期，无需手写 delete。
+   - 调用从 `detector.detect()` 变 `detector->detect()`。
+2. **stoi 防崩**（见 6.2）：非法帧数参数得到友好报错而非崩溃。
+3. 验证：错误模型路径 → 打印 `reason: Can't read ONNX file...` 后退出；`abc` 参数 → 打印 `Invalid max_frames argument` 后退出。
+4. 小知识：`return -1` 在 shell 显示为 255（-1 按无符号取模）；"非 0 即失败"语义不变，想直观可 `return EXIT_FAILURE`。
+
+---
+
+## 7. 自测清单（面试速查）
 
 - [ ] 能解释 `#pragma once` 和宏保护的等价关系
 - [ ] 能说出 `explicit` 解决什么问题、什么时候必须加
@@ -271,12 +400,23 @@ w  = data[2 * num_boxes + i];  h  = data[3 * num_boxes + i];
 - [ ] 能口述 letterbox（缩放+pad）与坐标还原（减 pad 除 ratio）的互逆关系
 - [ ] 能解释 blob 的 NCHW 排布、swapRB、1/255 各做什么
 - [ ] 能说出 `Mat::ptr<T>()`、`vector::reserve`、`rect &= ...` 各自干什么
+- [ ] 能区分 `atoi` 与 `stoi`（静默返回 vs 抛异常），并写出配套 try-catch
+- [ ] 能说清 `std::cout` / `std::cerr` / 抛异常三者区别
+- [ ] 能解释 VideoWriter 4 参数与 fourcc 含义、为什么后缀要匹配编码器
+- [ ] 能说清 `frames_with_armor` 与 `total_detections` 的语义差异
+- [ ] 能解释 `steady_clock` + `duration<double,milli>` + `.count()` 的计时原理
+- [ ] 能解释异常捕获为何用 `const T&`（切片/多态）、catch 顺序规则
+- [ ] 能说明 unique_ptr 解决"对象要活过 try 块"的原理
+- [ ] 能解释 `class_id` 的用途、为什么解析要算 argmax（而非硬编码 0）
+- [ ] 能说明 YOLO 用中心点表示框（cx/cy），以及如何换算成左上角
+- [ ] 能对照两种输出排布讲清两个下标公式（`f*N+i` vs `i*C+f`）
 
 ---
 
-## 7. 下一步
+## 8. 下一步
 
-- [ ] 通读 `01_detector/src/armor_detector.cpp`（letterbox 数学、blobFromImage、ONNX 输出的 5 个数、坐标还原）—— 题1 核心逻辑（问答见第 5 节）
-- [ ] 通读 `01_detector/src/demo_main.cpp`（视频循环、VideoWriter、drawArmors、FPS 统计）
+- [x] 通读 `01_detector/src/armor_detector.cpp`（letterbox 数学、blobFromImage、ONNX 输出的 5 个数、坐标还原）—— 题1 核心逻辑（问答见第 5 节）
+- [x] 通读 `01_detector/src/demo_main.cpp`（视频循环、VideoWriter、drawArmors、FPS 统计）—— 问答见第 6 节
+- [ ] 题1 收尾（可选加分）：README 附图、多视频验证、把阈值做成外部可配置
 - [ ] 题2 预告：tracker 需要**装甲板四角点**做 PnP，而 YOLO 只给轴对齐包围框 → 需要框内找灯条/角点或换方案
 - [ ] 提交规范：代码每完成一个里程碑 commit 一次，README 记录运行方式

@@ -9,12 +9,11 @@ namespace rm_vision {
 // 构造函数(加载模型)实现
 ArmorDetector::ArmorDetector(std::string model_path):
     net_(cv::dnn::readNetFromONNX(std::move(model_path))) {
-    
     // 检测加载是否成功
     if (net_.empty()) {
         throw std::runtime_error("Failed to load ONNX model");
     }
-    
+
     // 推理后端：OpenCV 自带引擎 + CPU。
     // 若 OpenCV 编译了 CUDA 且有显卡，可换成 DNN_TARGET_CUDA 提速。
     net_.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
@@ -69,11 +68,11 @@ std::vector<Armor> ArmorDetector::detect(const cv::Mat& frame) {
     // ---- 2. 前向推理 ----
     net_.setInput(blob);
     const cv::Mat output = net_.forward();
-    const float* data = output.ptr<float>();
+    const float* data = output.ptr<float>(); // 返回指向矩阵数据首元素的 float*
 
     // ---- 3. 解析输出 ----
     // YOLOv8 的导出结果有两种排布：(1, C, N) 或 (1, N, C)
-    // 这里 C = 4 个坐标 + 类别数 = 5，N = 候选框数量。
+    // 这里 C = 4 个坐标 + 类别数(仅装甲1个类别) = 5，N = 候选框数量。
     // 通过比较第 1、2 维的大小自动判断是哪种排布，保证鲁棒。
     const int dim1 = output.size[1];
     const int dim2 = output.size[2];
@@ -81,9 +80,9 @@ std::vector<Armor> ArmorDetector::detect(const cv::Mat& frame) {
     const int num_features = channel_major ? dim1 : dim2; // C
     const int num_boxes = channel_major ? dim2 : dim1; // N
 
-    std::vector<cv::Rect> boxes;
-    std::vector<float> scores;
-    std::vector<int> class_ids;
+    std::vector<cv::Rect> boxes; // 框
+    std::vector<float> scores; // 置信度
+    std::vector<int> class_ids; // id
     boxes.reserve(num_boxes);
     scores.reserve(num_boxes);
     class_ids.reserve(num_boxes);
@@ -95,12 +94,17 @@ std::vector<Armor> ArmorDetector::detect(const cv::Mat& frame) {
         const float w = channel_major ? data[2 * num_boxes + i] : data[i * num_features + 2];
         const float h = channel_major ? data[3 * num_boxes + i] : data[i * num_features + 3];
 
-        // 单类别：索引 4 就是置信度；多类别时应取各类别分数的最大值
+        // 取各类别分数中的最大值，并记录是哪一类（argmax）。
+        // 单类别时这里只有 f=4 一个分数；多类别时靠它选出得分最高的类
+        int best_class = -1;
         float max_score = 0.0f;
         for (int f = 4; f < num_features; ++f) {
             const float score =
                 channel_major ? data[f * num_boxes + i] : data[i * num_features + f];
-            max_score = std::max(max_score, score);
+            if (score > max_score) {
+                max_score = score;
+                best_class = f - 4; // 类别号 = 特征行号 - 4
+            }
         }
         if (max_score < conf_threshold_) {
             continue;
@@ -118,7 +122,7 @@ std::vector<Armor> ArmorDetector::detect(const cv::Mat& frame) {
 
         boxes.push_back(rect);
         scores.push_back(max_score);
-        class_ids.push_back(0);
+        class_ids.push_back(best_class);
     }
 
     // ---- 4. NMS：同一装甲板的重叠框只留置信度最高的一个 ----
