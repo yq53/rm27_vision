@@ -6,18 +6,22 @@
 
 namespace rm_vision {
 
-// 加载模型
+// 构造函数(加载模型)实现
 ArmorDetector::ArmorDetector(std::string model_path):
     net_(cv::dnn::readNetFromONNX(std::move(model_path))) {
+    
+    // 检测加载是否成功
     if (net_.empty()) {
         throw std::runtime_error("Failed to load ONNX model");
     }
+    
     // 推理后端：OpenCV 自带引擎 + CPU。
     // 若 OpenCV 编译了 CUDA 且有显卡，可换成 DNN_TARGET_CUDA 提速。
     net_.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
     net_.setPreferableTarget(cv::dnn::DNN_TARGET_CPU);
 }
 
+// letterbox函数实现
 cv::Mat ArmorDetector::letterbox(const cv::Mat& src, float& ratio, int& pad_w, int& pad_h) {
     const int src_w = src.cols;
     const int src_h = src.rows;
@@ -40,6 +44,7 @@ cv::Mat ArmorDetector::letterbox(const cv::Mat& src, float& ratio, int& pad_w, i
     return padded;
 }
 
+// detect函数实现
 std::vector<Armor> ArmorDetector::detect(const cv::Mat& frame) {
     std::vector<Armor> armors;
     if (frame.empty()) {

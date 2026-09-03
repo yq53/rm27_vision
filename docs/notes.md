@@ -11,8 +11,9 @@
 2. 环境备忘
 3. 题1：装甲板识别器（现状）
 4. 代码问答笔记（重点，面试速查）
-5. 自测清单
-6. 下一步
+5. armor_detector.cpp 实现问答（题1 核心）
+6. 自测清单
+7. 下一步
 
 ---
 
@@ -157,7 +158,103 @@ cmake --build build/01_detector -j
 
 ---
 
-## 5. 自测清单（面试速查）
+## 5. armor_detector.cpp 实现问答（题1 核心）
+
+### 5.1 backend 与 target（推理后端与目标设备）
+
+- 模型（ONNX）= 图纸：描述有哪些算子、怎么连。
+- **Backend** = 由谁执行这些算子（执行引擎）：`DNN_BACKEND_OPENCV`（OpenCV 内置实现）、`DNN_BACKEND_INFERENCE_ENGINE`（OpenVINO）、`DNN_BACKEND_CUDA`（cuDNN）、`DNN_BACKEND_OPENCL` 等。
+- **Target** = 在哪块硬件上算：`DNN_TARGET_CPU` / `DNN_TARGET_CUDA` / `DNN_TARGET_OPENCL` 等。
+- 一句话：**backend 决定"用什么软件去算"，target 决定"在哪块硬件上算"**；backend 必须支持所选的 target。
+- 比喻：模型=施工图纸，backend=请哪家施工队，target=工地（CPU 地块 / GPU 地块）。
+- `readNetFromONNX` 只解析；真正执行在 `net_.forward()` 时按 backend/target 进行。`setPreferable*` 是"偏好"，OpenCV 没编译对应引擎时会回退/报错。
+
+### 5.2 letterbox 的 pad / pad_w / pad_h
+
+- 流程：原图按长边等比缩到 640（1440×1080 → 640×480）→ 宽/高不够 640 的方向补**灰色边框**让画面居中。
+- `pad_w` = 左右每侧补的灰边像素（本例=0）；`pad_h` = 上下每侧补的灰边像素（本例=(640−480)/2=80）。
+- 它们是 letterbox 的**输出参数**（引用带出），detect 坐标还原时要"减 pad 再除 ratio"。
+- 灰边值 114 与训练时 Ultralytics 的 letterbox 一致——推理必须和训练同分布。
+
+### 5.3 `static_cast<float>` 与整数除法陷阱
+
+- `int / int` = 整数除法，结果截断：`640 / 1440 == 0`（不是 0.44）→ ratio 变 0 检测全废。
+- `static_cast<float>(kInputSize)` 把一个 int 显式转成 float，使除法变成浮点除法。
+- 用 static_cast 而非 C 风格 `(float)x`：编译期类型检查 + 代码里显眼可搜索。
+- 口诀：**想要小数结果，先让至少一个操作数变成浮点**。
+
+### 5.4 blob 是什么
+
+- blob（借用 Caffe 术语）= 喂给网络的输入张量。
+- `blobFromImage` 把图像重排成 **NCHW 四维连续 float 数组**：N=1（batch）、C=3（通道分离：先整排 R 再整排 G 再整排 B）、H=W=640；数值 0~255 → 0~1；BGR→RGB（swapRB=true）。
+- 一句话：把人能看的图，变成"网络指定的内存排布 + 类型 + 数值范围"的数字块。
+
+### 5.5 为什么 `ratio` 不能加 constexpr
+
+- `constexpr` = **编译期**常量；`ratio` 的值取决于**运行期**才读到的图片尺寸，天生不可能是 constexpr。
+- 且该行后面要被 letterbox 通过**引用改写**（输出参数），也不是 const。
+- constexpr 不是性能优化工具：这种一帧一次的初始化开销可忽略，编译器自己会优化。**先跑通、用 profiler 找热点再优化**；51ms/帧里 99% 是 forward。
+
+### 5.6 const 加在哪（规则 + 实例）
+
+- 规则：**初始化之后不再改变的量就加 const**（防误改、表达意图、助优化）。
+- 例子：`input/blob/output`（只读传给下一级）、`dim1/num_boxes`（循环上界）、每轮循环里的 `cx/cy/w/h`。
+- 不能加 const：被引用改写的输出参数（`ratio/pad_w/pad_h`）、循环内被更新的量（`max_score`）。
+- 习惯：先默认 const，需要改时再摘——摘 const 是状态在变化的信号。
+
+### 5.7 `output.ptr<float>()`
+
+- `cv::Mat::ptr<T>()` 是**成员函数模板**：返回指向矩阵数据首元素的 `T*`，用于把 Mat 当 C 数组直接快速遍历（避开 `.at()` 的检查开销）。
+- `output` 是 const 时返回 `const float*`（const 重载）。
+- 推理输出内部就是连续一维 float 数组 + 维度元信息 `output.size[]`，ptr 只是把这个事实暴露出来。
+
+### 5.8 `vector::reserve`
+
+- `size()` = 当前元素数；`capacity()` = 已分配容量。
+- `push_back` 在 `size==capacity` 时要**扩容搬家**（重新分配+搬元素），vector 默认翻倍扩容。
+- `reserve(n)` = 提前把容量扩到 n，后续 push_back 不触发扩容——**明确知道数量级时的标准优化**（如 `boxes.reserve(num_boxes)`、`armors.reserve(indices.size())`）。不改 size。
+
+### 5.9 YOLO 输出里的 C 与 N
+
+- 输出 = 二维矩阵，**C（特征维）= 4 + 类别数**：每框前 4 个数 `cx,cy,w,h`（640 输入图像素单位），第 4 个起是各类别得分（单类时 C=5，第 4 个数即置信度）。
+- **N（候选框数）**：YOLO 在多尺度网格每个位置都预测框，640 输入 = 80²+40²+20² = **8400** 个候选框，绝大多数是背景垃圾框 → 靠 conf 阈值 + NMS 过滤。
+- 实际行列数受输入尺寸影响，但"每候选框 C 个数"结构不变。
+
+### 5.10 data 内存结构 + detect 全流程
+
+**channel-major 排布 `(1, C=5, N=8400)`**（本模型导出形式），把它想成 **5 行 × 8400 列**的表格，每列是一个候选框：
+
+```
+行0 cx / 行1 cy / 行2 w / 行3 h / 行4 conf
+```
+
+内存按行连续（row-major）→ 第 f 行第 i 列偏移 = `f * num_boxes + i`：
+```cpp
+cx = data[0 * num_boxes + i];  cy = data[1 * num_boxes + i];
+w  = data[2 * num_boxes + i];  h  = data[3 * num_boxes + i];
+```
+"前 num_boxes 个数是同一类数据" —— 正确：前 N 个全是 cx，接着 N 个全是 cy……
+
+**转置排布兼容**：部分导出工具给 `(1, N, C)`（每行一个框的 5 个数）。代码比较 `dim1/dim2` 大小自动判断（5<8400 → channel-major），这就是第 78~82 行的作用——比 trainning/main.cpp 写死一种更健壮。
+
+**detect 全流程（对照行号）**：
+1. 预处理（54~67）：letterbox 缩放+灰边（拿到 ratio/pad 逆变换参数）→ blobFromImage 转 NCHW。
+2. 前向（70~72）：`setInput` → `forward()` → `ptr<float>()` 拿裸数据。
+3. 解析循环（91~122）：逐候选框取 cx,cy,w,h + 各类别分数取最大；低于 conf 阈值 continue。
+4. 坐标还原（109~117）：**与 letterbox 互逆**——`原图 = (画布坐标 − pad) ÷ ratio`：
+   ```
+   x = (cx − w/2 − pad_w) / ratio
+   y = (cy − h/2 − pad_h) / ratio
+   bw = w / ratio;  bh = h / ratio
+   ```
+   再 `rect &= Rect(0,0,cols,rows)` 裁越界（`&` 被重载为矩形求交）。
+5. 组装 + NMS（119~131）：阈值过滤后的框 push 进三个平行 vector（reserve 预留）→ `NMSBoxes` 收敛重叠框（indices 是保留框的下标）→ 组装成 `Armor` 返回。
+
+**数值例子**：原图 1440×1080 → ratio≈0.444，缩到 640×480，pad_h=80。画布检出中心(400,300)宽高(200,100) → 原图 x=(400−100−0)/0.444≈675、y=(300−50−80)/0.444≈383。
+
+---
+
+## 6. 自测清单（面试速查）
 
 - [ ] 能解释 `#pragma once` 和宏保护的等价关系
 - [ ] 能说出 `explicit` 解决什么问题、什么时候必须加
@@ -168,11 +265,18 @@ cmake --build build/01_detector -j
 - [ ] 能手写/口述 NMS 贪心流程，说清两个阈值各自控制什么
 - [ ] 能解释 `rm_vision::` 前缀的意义、头文件为什么禁止 using namespace
 - [ ] 能说明 Google 风格下常量/成员/局部变量的命名差异
+- [ ] 能区分 backend 和 target，并说出本项目的设置（OPENCV + CPU）
+- [ ] 能解释整数除法陷阱和 static_cast 的作用
+- [ ] 能画出 YOLO 输出表格（5 行 × N 列）并解释 C/N 含义
+- [ ] 能口述 letterbox（缩放+pad）与坐标还原（减 pad 除 ratio）的互逆关系
+- [ ] 能解释 blob 的 NCHW 排布、swapRB、1/255 各做什么
+- [ ] 能说出 `Mat::ptr<T>()`、`vector::reserve`、`rect &= ...` 各自干什么
 
 ---
 
-## 6. 下一步
+## 7. 下一步
 
-- [ ] 通读 `01_detector/src/armor_detector.cpp`（letterbox 数学、blobFromImage、ONNX 输出的 5 个数、坐标还原）—— 题1 核心逻辑
+- [ ] 通读 `01_detector/src/armor_detector.cpp`（letterbox 数学、blobFromImage、ONNX 输出的 5 个数、坐标还原）—— 题1 核心逻辑（问答见第 5 节）
+- [ ] 通读 `01_detector/src/demo_main.cpp`（视频循环、VideoWriter、drawArmors、FPS 统计）
 - [ ] 题2 预告：tracker 需要**装甲板四角点**做 PnP，而 YOLO 只给轴对齐包围框 → 需要框内找灯条/角点或换方案
 - [ ] 提交规范：代码每完成一个里程碑 commit 一次，README 记录运行方式
