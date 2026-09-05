@@ -19,3 +19,7 @@ target_link_libraries(projection_demo PRIVATE ${OpenCV_LIBS})
 # L3：让 YOLO 框长出四角点（v1：bbox 角点近似），打通 01_detector -> 02_tracker
 add_executable(corner_demo src/corner_demo.cpp)
 target_link_libraries(corner_demo PRIVATE armor_detector ${OpenCV_LIBS})
+
+# L4：PnP 闭环（A 合成验证 + B 视频叠加测距）
+add_executable(pnp_demo src/pnp_demo.cpp)
+target_link_libraries(pnp_demo PRIVATE armor_detector ${OpenCV_LIBS})
