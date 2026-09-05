@@ -84,13 +84,15 @@ struct SolveResult {
 
 // 求解一块板：object(3D) + image(2D) -> PnP -> 统计
 bool solveArmor(
-    const std::vector<cv::Point3d>& object,
-    const std::vector<cv::Point2d>& image,
+    const std::vector<cv::Point3d>& object, // 板坐标系
+    const std::vector<cv::Point2d>& image, // 像素坐标系
     SolveResult& out
 ) {
     // IPPE 有"镜像歧义"：同一组点可能对应两个位姿。OpenCV 4.x 的 solvePnP(IPPE)
     // 在带噪声输入下可能返回错误的那一个，因此改用 solvePnPGeneric 拿全部候选，
     // 再用"重投影误差最小"来挑选（顺便得到验证指标）。
+
+    // 重投影误差统计函数(平均误差 + 最大误差)
     auto reproj_error = [&](const cv::Mat& rvec, const cv::Mat& tvec) {
         std::vector<cv::Point2d> reproj;
         cv::projectPoints(object, rvec, tvec, cameraMatrix(), cv::noArray(), reproj);
@@ -119,16 +121,44 @@ bool solveArmor(
             false,
             cv::SOLVEPNP_IPPE
         );
-        double best_err = std::numeric_limits<double>::max();
+
+        // 镜像歧义的 tie-break：镜像两解的重投影误差几乎相同、无法靠误差区分，
+        // 但板面法线（旋转矩阵第 3 列 r3）方向相反。比赛场景中板只会正面朝向
+        // 相机（转过去就被挡住/检测不到），因此：
+        //   若存在 r3.z > 0（法线朝相机）的候选，就只在正面候选里比误差；
+        //   若全部不正面，才退回"误差最小"。
+        struct Candidate {
+            cv::Mat rvec;
+            cv::Mat tvec;
+            double err;
+            bool front; // r3.z > 0
+        };
+        std::vector<Candidate> cands;
+        cands.reserve(rvecs.size());
         for (size_t k = 0; k < rvecs.size(); ++k) {
-            const double err = reproj_error(rvecs[k], tvecs[k]).first;
-            if (err < best_err) {
-                best_err = err;
-                best_rvec = rvecs[k];
-                best_tvec = tvecs[k];
+            cv::Mat rmat;
+            cv::Rodrigues(rvecs[k], rmat);
+            const bool front = rmat.at<double>(2, 2) > 0.0; // 第三列第三行 = r3.z
+            cands.push_back({ rvecs[k], tvecs[k], reproj_error(rvecs[k], tvecs[k]).first, front });
+        }
+
+        bool any_front = false;
+        for (const auto& c: cands) {
+            any_front = any_front || c.front;
+        }
+
+        double best_err = std::numeric_limits<double>::max();
+        for (const auto& c: cands) {
+            if (any_front && !c.front) {
+                continue; // 有正面解可选时，跳过背面候选
+            }
+            if (c.err < best_err) {
+                best_err = c.err;
+                best_rvec = c.rvec;
+                best_tvec = c.tvec;
             }
         }
-        found = !rvecs.empty();
+        found = !cands.empty();
     } catch (const cv::Exception& e) {
         std::cerr << "[WARN] solvePnPGeneric failed: " << e.what() << std::endl;
         return false;
@@ -190,7 +220,7 @@ int main(int argc, char** argv) {
     // ================= A 段：合成闭环验证（不需要视频/模型） =================
     std::cout << "======== A 段：合成闭环（真值 -> 像素 -> PnP 反解） ========\n";
     {
-        const auto object = plateObjectPoints();
+        const auto object = plateObjectPoints(); // 板坐标系
 
         // 真值：板中心在相机系 (0.30, 0.05, 3.00)，绕 Y 轴转 0.25 rad ≈ 14.3°
         const double kTrueYaw = 0.25;
@@ -198,7 +228,7 @@ int main(int argc, char** argv) {
         const double true_dist = cv::norm(t_true); // = 3.015 m（不是 3.00！）
 
         // 1) 正投影生成"测量到的像素角点"
-        std::vector<cv::Point2d> image;
+        std::vector<cv::Point2d> image; // 像素坐标系
         for (const auto& p: object) {
             image.push_back(projectPoint(rotateYaw(p, kTrueYaw) + t_true));
         }
