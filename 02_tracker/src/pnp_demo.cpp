@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -110,6 +111,7 @@ bool solveArmor(
     cv::Mat best_rvec, best_tvec;
     bool found = false;
     try {
+        // 得到所有的rvec和trev
         std::vector<cv::Mat> rvecs, tvecs;
         cv::solvePnPGeneric(
             object,
@@ -127,25 +129,27 @@ bool solveArmor(
         // 相机（转过去就被挡住/检测不到），因此：
         //   若存在 r3.z > 0（法线朝相机）的候选，就只在正面候选里比误差；
         //   若全部不正面，才退回"误差最小"。
+
+        // 候选者结构体
         struct Candidate {
             cv::Mat rvec;
             cv::Mat tvec;
             double err;
             bool front; // r3.z > 0
         };
+        // 构建候选者向量
         std::vector<Candidate> cands;
         cands.reserve(rvecs.size());
         for (size_t k = 0; k < rvecs.size(); ++k) {
             cv::Mat rmat;
-            cv::Rodrigues(rvecs[k], rmat);
+            cv::Rodrigues(rvecs[k], rmat); // 旋转向量 ⇄ 旋转矩阵
             const bool front = rmat.at<double>(2, 2) > 0.0; // 第三列第三行 = r3.z
             cands.push_back({ rvecs[k], tvecs[k], reproj_error(rvecs[k], tvecs[k]).first, front });
         }
 
-        bool any_front = false;
-        for (const auto& c: cands) {
-            any_front = any_front || c.front;
-        }
+        // 是否存在至少一个"正面朝相机"的候选（std::any_of 找到第一个就短路返回）
+        const bool any_front =
+            std::any_of(cands.begin(), cands.end(), [](const Candidate& c) { return c.front; });
 
         double best_err = std::numeric_limits<double>::max();
         for (const auto& c: cands) {
