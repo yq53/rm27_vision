@@ -173,8 +173,12 @@ bool solveArmor(
 
     // OpenCV 4.x 的 IPPE 在带噪输入下可能给出病态解（重投影误差天文数字）。
     // 兜底：用 ITERATIVE（无初值）再解一次，谁的重投影误差小就用谁。
+
+    // 挑选出IPPE算出的最佳外参，并计算误差
     cv::Mat pick_r = best_rvec, pick_t = best_tvec;
     auto [mean_err, max_err] = reproj_error(pick_r, pick_t);
+
+    // 利用 ITERATIVE 算法再解一次
     try {
         cv::Mat r_iter, t_iter;
         cv::solvePnP(
@@ -188,6 +192,8 @@ bool solveArmor(
             cv::SOLVEPNP_ITERATIVE
         );
         const auto [m2, x2] = reproj_error(r_iter, t_iter);
+
+        // 如果 ITERATIVE 算法得到的误差比 IPPE得到的更小，更新最优外参
         if (m2 < mean_err) {
             mean_err = m2;
             max_err = x2;
@@ -231,13 +237,13 @@ int main(int argc, char** argv) {
         const cv::Point3d t_true(0.30, 0.05, 3.00);
         const double true_dist = cv::norm(t_true); // = 3.015 m（不是 3.00！）
 
-        // 1) 正投影生成"测量到的像素角点"
+        // 1) 真值正投影生成"测量到的像素角点"
         std::vector<cv::Point2d> image; // 像素坐标系
         for (const auto& p: object) {
             image.push_back(projectPoint(rotateYaw(p, kTrueYaw) + t_true));
         }
 
-        // 2) PnP 反解（干净数据）
+        // 2) PnP 反解并与真值对比
         SolveResult clean;
         if (solveArmor(object, image, clean)) {
             std::cout << "clean data : dist=" << std::fixed << std::setprecision(3) << clean.dist_m

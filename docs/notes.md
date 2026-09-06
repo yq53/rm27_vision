@@ -731,3 +731,28 @@ cv::solvePnP(objectPoints, imagePoints, cameraMatrix, distCoeffs /*空*/,
 - **solveArmor 管线**：`solvePnPGeneric` 全候选 → `reproj_error` 打分 →（有则）$r_3.z>0$ 正面约束 → 误差最小 → 误差 >10px 时 ITERATIVE 无初值兜底 → 仍 >10px 判失败跳过。
 - **double 一致性坑**：object 用 double，`projectPoints` 输出容器也必须 double（float 容器触发类型断言崩溃）。
 - 工程意义：把"选解"的裁判权从库拿回自己手里（重投影误差 + 领域物理约束）。
+
+### 13.6 L4 A 段（合成闭环）串讲与问答沉淀
+
+**A 段角色**：给 PnP 造"带真值的实验"——先证明反链路通，才敢信 B 段真实数据。
+
+**五步流程**：① 定真值 $t=(0.3,0.05,3.0),\ yaw=0.25\text{rad}$ → ② **用手写 L1 投影**（不用 solvePnP 自身）生成像素 → ③ solveArmor 反解 → ④ 与真值对比 → ⑤ 判定。
+- 第②步用独立代码生成测量值，避免"用答案验证答案"。
+
+**solveArmor 管线（双保险）**：
+```
+solvePnPGeneric(IPPE) 全候选 → 每候选算 (重投影误差, r3.z>0?)
+std::any_of(短路) 判有无正面解 → 有则只在正面池选最小误差(破镜像)
+→ ITERATIVE 兜底(换算法再解, 谁误差小用谁) → >10px 闸门拒收 → 输出
+```
+- 误差闸门管"数值垃圾解"(4.x bug 会吐 1e17px)；$r_3.z>0$ 管"镜像歧义"——各管一事。
+
+**验证结果**：`dist=3.015m(=|t|, 不是 3.00) | yaw=14.3° | reproj=0px` → 反链路通 ✅
+
+**问答沉淀**（详见各小节与对话）：
+- PnP：每点 2 标量方程、4 点 8 > 6 自由度 → 超定最小二乘；P3P 下界但多解/退化 → 4 共面点是甜点；
+- IPPE=共面点专用(板躺 z=0)；镜像两解仅 $r_3$ 反号 → 距离/yaw 不受影响，破镜用物理先验；
+- rvec(Rodrigues)↔R；$r_1,r_2,r_3$=R 三列=板三轴在相机系的表达；
+- yaw 公式方法论：写矩阵→读 c/s 元素→atan2→已知角验证（不背公式）；
+- 误差指标：mean/max、模长 vs 平方、10px 经验闸门；
+- 工程：size_t/++k/std::any_of 短路/结构化绑定 auto[a,b]/fixed+setprecision/double 一致性。
