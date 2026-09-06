@@ -756,3 +756,11 @@ std::any_of(短路) 判有无正面解 → 有则只在正面池选最小误差(
 - yaw 公式方法论：写矩阵→读 c/s 元素→atan2→已知角验证（不背公式）；
 - 误差指标：mean/max、模长 vs 平方、10px 经验闸门；
 - 工程：size_t/++k/std::any_of 短路/结构化绑定 auto[a,b]/fixed+setprecision/double 一致性。
+
+### 13.7 L4 B 段（真实数据）速览
+
+- 与 corner_demo/demo_main **同款视频外壳**（Rule of Three 实锤：第三份外壳已出现，待 L7 统一抽象）。
+- 每帧管线：`detect → rectToCorners → solveArmor` → 成功则画框 + `putText(d=..m yaw=..deg)`；失败（>10px 闸门）**静默跳过**。
+- **工作目录坑**：默认相对路径按 CWD 解析 → 必须在仓库根目录运行（README 约定）或传相对路径。
+- **统计局限**：`solved`/`avg dist` 只能粗看；板忽远忽近时均值意义有限 → 需要"随时间稳定"的指标（帧间平滑度/预测误差/丢帧保持）→ 这正是 EKF 的评估动机。
+- **观察结论**：d 帧间抖动（单帧像素噪声被放大）、漏检断档 → L6 EKF 的"抖/断/瞎"三宗罪在此完整呈现。
