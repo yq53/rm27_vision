@@ -23,3 +23,12 @@ target_link_libraries(corner_demo PRIVATE armor_detector ${OpenCV_LIBS})
 # L4：PnP 闭环（A 合成验证 + B 视频叠加测距）
 add_executable(pnp_demo src/pnp_demo.cpp)
 target_link_libraries(pnp_demo PRIVATE armor_detector ${OpenCV_LIBS})
+
+# L7：ArmorEKF 库（头文件在 include/，与 01_detector 同款规范）
+add_library(armor_ekf STATIC src/armor_ekf.cpp)
+target_include_directories(armor_ekf PUBLIC include)
+target_link_libraries(armor_ekf PUBLIC ${OpenCV_LIBS})
+
+# L7：tracker_demo（PnP -> EKF 平滑，原/滤对比）
+add_executable(tracker_demo src/tracker_demo.cpp)
+target_link_libraries(tracker_demo PRIVATE armor_detector armor_ekf ${OpenCV_LIBS})

@@ -22,6 +22,7 @@
 13. L4 PnP 概念问答（代码待写）
 14. L5 概率统计速补（EKF 前置）
 15. L6 卡尔曼心智模型与 EKF 决策
+16. L7 ArmorEKF 与 tracker_demo（题2 v1 完成）
 
 ---
 
@@ -854,3 +855,35 @@ std::any_of(短路) 判有无正面解 → 有则只在正面池选最小误差(
 1. v1 用 KF：运动常速、测量=PnP 位姿，两处都线性（见 15.3）。
 2. 漏检帧：只预测不更新；$P$ 增大、仍输出外推位姿。
 3. K=残差 $(z-H\bar{x})$ 的系数；$K$ 大 → 信测量；$K$ 小 → 信预测。
+
+---
+
+## 16. L7 ArmorEKF 与 tracker_demo（题2 v1 完成）
+
+### 16.1 交付与验证
+
+- 新库 `armor_ekf`（include/armor_ekf/ + src/armor_ekf.cpp）+ `tracker_demo.cpp`；CMake 新增 `armor_ekf`(STATIC) 与 `tracker_demo`；既有 demo 未动。
+- 300 帧结果：**相邻帧距离跳动 raw 0.042 → EKF 0.020 m（抖减半）**；detected 191 / predict-only 109；avg dist raw 0.654 vs EKF 0.668；`results/tracker_demo.avi`（绿=原始、黄=EKF+速度）。
+
+### 16.2 EKF 类要点
+
+- 成员 `H_, R_, q_, P_, x_` 与教材映射：`x_/P_` **原位更新**（x̄/P̄ 是阶段语义不是两个变量）；$z$ 走 init/update 入参；$F/Q$ 在 predict 里按 dt 现造（buildF/buildQ）；`R_` 注释"测量噪声"实为"**测量噪声的协方差矩阵**"（简称，$v\sim\mathcal{N}(0,R)$）。
+- Q 推导三层次：作用必懂（Q 大 → P 涨 → 更信测量）；dt 幂次直觉（加速度积分两次到位置→dt⁴、一次到速度→dt²）；离散化公式是标准结果，不必每次重推。
+- const 三位置速记：括号后=对象只读；返回类型前=只读引用；变量前=不可改。
+- 初始 P0：位置 $0.05^2$（宁大勿小）、速度 $4.0$（未知给大）；初值只影响过渡段，$P$ 收敛到由 Q/R 决定的稳态。
+- R 与 q 的初始化统一为 setter（用户自行改进）。
+
+### 16.3 单目标简化（多目标 = MOT）
+
+- 一个 EKF 只跟一块板；多目标需**数据关联**（最近邻/匈牙利）+ 每目标一个滤波器 + 目标管理。
+- 挑面积最大 ≈ 最近（面积 ∝ 1/Z²）；代价：两块板交替最大时会跳目标（v1 接受）。
+
+### 16.4 主循环数据流（tracker_demo）
+
+- 每帧：① detect → ② **无条件 predict(dt)**（漏检也外推）→ ③ 挑面积最大目标 → ④ 有目标：solvePnP→init/update→记 raw_dists；无目标：predict-only。
+- `raw_dists` 有检测才记；`filt_dists` 初始化后**每帧**记（含预测帧）——对比指标的基础。
+- 时间线心智模型：predict = 上一帧后验 → 本帧先验；update = 本帧先验 + 本帧 z → 本帧后验。
+
+### 16.5 下一步（L8）
+
+v2：框内**灯条精定位**（灯条端点 → 更准的四角点 → PnP 更准），顺带修题1 灯条误检。
