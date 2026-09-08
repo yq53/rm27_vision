@@ -32,3 +32,11 @@ target_link_libraries(armor_ekf PUBLIC ${OpenCV_LIBS})
 # L7：tracker_demo（PnP -> EKF 平滑，原/滤对比）
 add_executable(tracker_demo src/tracker_demo.cpp)
 target_link_libraries(tracker_demo PRIVATE armor_detector armor_ekf ${OpenCV_LIBS})
+
+# L8：框内灯条精定位库 + 演示（v2 的 CV 半边）
+add_library(light_bar_detector STATIC src/light_bar_detector.cpp)
+target_include_directories(light_bar_detector PUBLIC include)
+target_link_libraries(light_bar_detector PUBLIC ${OpenCV_LIBS})
+
+add_executable(lightbar_demo src/lightbar_demo.cpp)
+target_link_libraries(lightbar_demo PRIVATE armor_detector light_bar_detector ${OpenCV_LIBS})
