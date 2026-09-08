@@ -4,8 +4,6 @@
 #include <memory>
 
 #include <cv_bridge/cv_bridge.h>
-#include <geometry_msgs/msg/pose_stamped.hpp>
-#include <geometry_msgs/msg/twist_stamped.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
 
@@ -13,7 +11,9 @@
 
 #include "armor_detector/armor_detector.hpp"
 #include "armor_ekf/armor_ekf.hpp"
+#include "rm_interfaces/msg/armor_state.hpp"
 
+using rm_interfaces::msg::ArmorState;
 using rm_tracker::ArmorEKF;
 using rm_vision::Armor;
 using rm_vision::ArmorDetector;
@@ -107,6 +107,7 @@ bool solveArmorPosition(
 
 } // namespace
 
+// 主节点：读图像源 -> detect -> PnP(z) -> EKF -> 发一条自定义 /armor/state + 标注图
 class ArmorTrackerNode: public rclcpp::Node {
 public:
     ArmorTrackerNode(): Node("armor_tracker_node") {
@@ -131,11 +132,10 @@ public:
 
         img_pub_ =
             create_publisher<sensor_msgs::msg::Image>("armor/annotated", rclcpp::SensorDataQoS());
-        pose_pub_ = create_publisher<geometry_msgs::msg::PoseStamped>("armor/pose", 10);
-        twist_pub_ = create_publisher<geometry_msgs::msg::TwistStamped>("armor/twist", 10);
+        state_pub_ = create_publisher<ArmorState>("armor/state", 10);
         timer_ =
             create_wall_timer(std::chrono::duration<double>(1.0 / fps), [this]() { onTimer(); });
-        RCLCPP_INFO(get_logger(), "publishing /armor/annotated & /armor/pose & /armor/twist");
+        RCLCPP_INFO(get_logger(), "publishing /armor/annotated & /armor/state");
     }
 
 private:
@@ -179,34 +179,29 @@ private:
         if (ekf_.initialized()) {
             const cv::Mat& x = ekf_.state();
 
-            geometry_msgs::msg::PoseStamped pose;
-            pose.header.stamp = now();
-            pose.header.frame_id = "camera";
-            pose.pose.position.x = x.at<double>(0);
-            pose.pose.position.y = x.at<double>(1);
-            pose.pose.position.z = x.at<double>(2);
-            pose_pub_->publish(pose);
-
-            geometry_msgs::msg::TwistStamped twist;
-            twist.header.stamp = now();
-            twist.header.frame_id = "camera";
-            twist.twist.linear.x = x.at<double>(3);
-            twist.twist.linear.y = x.at<double>(4);
-            twist.twist.linear.z = x.at<double>(5);
-            twist_pub_->publish(twist);
-
-            const double dist = std::sqrt(
-                x.at<double>(0) * x.at<double>(0) + x.at<double>(1) * x.at<double>(1)
-                + x.at<double>(2) * x.at<double>(2)
+            ArmorState msg;
+            msg.header.stamp = now();
+            msg.header.frame_id = "camera";
+            msg.position.x = x.at<double>(0);
+            msg.position.y = x.at<double>(1);
+            msg.position.z = x.at<double>(2);
+            msg.velocity.x = x.at<double>(3);
+            msg.velocity.y = x.at<double>(4);
+            msg.velocity.z = x.at<double>(5);
+            msg.distance = std::sqrt(
+                msg.position.x * msg.position.x + msg.position.y * msg.position.y
+                + msg.position.z * msg.position.z
             );
+            state_pub_->publish(msg);
+
             cv::putText(
                 frame,
                 cv::format(
                     "d=%.2fm v=(%.1f,%.1f,%.1f)",
-                    dist,
-                    x.at<double>(3),
-                    x.at<double>(4),
-                    x.at<double>(5)
+                    msg.distance,
+                    msg.velocity.x,
+                    msg.velocity.y,
+                    msg.velocity.z
                 ),
                 cv::Point(60, 60),
                 cv::FONT_HERSHEY_SIMPLEX,
@@ -227,8 +222,7 @@ private:
     ArmorEKF ekf_;
     double dt_ = 1.0 / 30.0;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr img_pub_;
-    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub_;
-    rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr twist_pub_;
+    rclcpp::Publisher<ArmorState>::SharedPtr state_pub_;
     rclcpp::TimerBase::SharedPtr timer_;
 };
 
