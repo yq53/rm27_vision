@@ -61,3 +61,26 @@ cmake --build build/01_detector -j
 
 - 暗光下模型可能把一个装甲板的两个灯条误检成两个装甲（两灯条框 IoU≈0，NMS 不会合并；根因在模型层）。
 - 单帧漏检 → 交给题2 tracker 用跨帧信息处理。
+
+---
+
+## 题3：ROS2 接入与可视化（P0 已通）
+
+把题1 detector 包装成 ROS2 节点：视频/相机帧 → 检测 → 发布标注图像话题。
+
+```bash
+# 构建（仓库根目录）
+source /opt/ros/humble/setup.bash
+colcon build --packages-select rm_armor_visualization
+
+# 终端1：运行节点（视频当图像源，循环播放）
+source install/setup.bash
+ros2 run rm_armor_visualization armor_video_node --ros-args -p video_path:=data/demo.avi
+
+# 终端2：可视化（直接带话题参数，避免手动选择）
+source install/setup.bash
+ros2 run rqt_image_view rqt_image_view /armor/annotated
+```
+
+> 沙箱环境提示：若 `~/.ros` 只读导致日志失败，先 `export ROS_LOG_DIR=$PWD/.roslog`。
+> 参数：`video_path`（默认 data/demo.avi）、`model_path`（默认 models/armor_yolov8n.onnx）、`loop`（默认 true）。
