@@ -25,6 +25,7 @@
 16. L7 ArmorEKF 与 tracker_demo（题2 v1 完成）
 17. L8 v2 灯条精定位（规划与概念）
 18. 模型域差实验（Plan A 结论）
+19. 题3 ROS2 接入与可视化（P0/P1 完成）
 
 ---
 
@@ -35,8 +36,8 @@
 | 题 | 内容 | 状态 |
 |---|---|---|
 | 题1 | 装甲板识别器 detector（传统视觉或神经网络均可） | ✅ 已跑通 |
-| 题2 | 装甲板跟踪器 tracker（PnP+EKF 等，后端不限） | 🔄 进行中（v1→v2 分步） |
-| 题3 | 接入仿真/真实相机 + 可视化界面 | ⏳ 未开始 |
+| 题2 | 装甲板跟踪器 tracker（PnP+EKF 等，后端不限） | ✅ v1 完成 + v2 原型 |
+| 题3 | 接入仿真/真实相机 + 可视化界面 | 🔄 P0/P1 完成，真实相机源待补 |
 
 **语言路线**：全程 C++（ROS2 + OpenCV C++），与战队 clang + VSCode 环境一致。
 
@@ -960,3 +961,47 @@ v2：框内**灯条精定位**（灯条端点 → 更准的四角点 → PnP 更
 
 - 默认模型维持 baseline；dark onnx 与训练 run 存档为实验（trainning/ 内，不入仓库）。
 - 价值：协议干净 + 流程完整（续训/导出/跨域评估）+ 可面试讲述的负结果（"为什么简单压暗不够"）。
+
+---
+
+## 19. 题3 ROS2 接入与可视化（2026-09-08，P0/P1 完成）
+
+### 19.1 题3 要求与验收对照
+
+> 题3：可接入仿真/真实相机验证算法 + 可视化界面展示算法。
+
+| 要求 | 状态 |
+|---|---|
+| 可视化展示算法 | ✅ rqt_image_view 实时显示标注图 + 状态话题 |
+| 完整算法接入 | ✅ detect→PnP→EKF 在 ROS2 主节点运行 |
+| 自定义消息打包状态 | ✅ 单条 `/armor/state`（独立接口包） |
+| **真实相机/仿真验证** | ❌ 待做（只有手机 → IP Webcam 路线） |
+| 交付文档/录屏 | ⏳ 收尾阶段 |
+
+### 19.2 工程结构与阶段
+
+- `rm_interfaces/`：**独立接口包**（标准姿势）——`ArmorState.msg`（header+position+velocity+distance）。注意 `<member_of_group>rosidl_interface_packages</member_of_group>` 必须在 package.xml **顶层**（解析器不认 export 里）。
+- `03_visualization/`
+  - `armor_video_node`：P0 教学示例（仅 detector + 图像话题）。
+  - `armor_tracker_node`：**主节点**（读源→detect→PnP→EKF→单条 `/armor/state` + 标注图）。
+- CMake 复用 02_tracker（含 armor_detector/armor_ekf）；主循环=armor_video_node 外壳 + tracker_demo 逻辑的融合（predict 每帧先跑、首帧 init、漏检帧也发预测值）。
+
+### 19.3 ROS2 概念速查（本阶段新增）
+
+- **Node/Publisher/Timer/Parameter**：节点=一个进程（spin 保持活跃）；publisher=广播频道；wall timer=按真实时间周期回调（替代 while+rate）；parameter=运行时可改配置（`-p video_path:=...`）。
+- **Header**：消息身份证——`stamp`（何时产生，决策/TF 靠它）+ `frame_id`（属于哪个坐标系）。
+- **cv_bridge**：OpenCV `Mat` ↔ ROS `sensor_msgs/Image` 的桥；`CvImage(header,编码,mat).toImageMsg()` 装箱发布；反向 `toCvCopy` 拆箱（订阅相机时用）。
+- **QoS 混用**：按数据类型选——传感器流（图像）best_effort（`SensorDataQoS`：可丢、低延迟、大消息别可靠重传）；状态/控制 reliable（不能丢、量小）。每话题独立协商，同节点可混用。
+
+### 19.4 踩坑日志（面试谈资）
+
+1. **图像传输 message lost / rqt 无画面**：双因——发布端 RELIABLE vs 订阅端 BEST_EFFORT 的 RMW 差异（改 `SensorDataQoS` 对齐）+ **CycloneDDS 大图像(4.6MB/帧)传输大量丢失**。解法：`export RMW_IMPLEMENTATION=rmw_fastrtps_cpp`（建议写入 ~/.bashrc）。教训：**RMW 表现异常先换 RMW 再查代码**。
+2. **rqt 带话题参数启动**才稳定（手动下拉经常没真正订阅，显示占位渐变图）。
+3. **自定义消息不能"同包给可执行程序直用"**（Humble 需 typesupport 目标仪式感，易错）→ 正确姿势=**独立接口包**；成员 group 必须顶层。
+4. `ros2 topic echo --field width` 之类有时阻塞：大消息 + best_effort 偶发丢，用 `hz`/多试可证。
+
+### 19.5 下一步
+
+1. P2：手机 IP Webcam 作为真实图像源（补"真实相机验证"缺口）；
+2. 收尾：README 三题运行说明、录屏/截图、面试问答演练、多端备份；
+3. 可选重构：`solveArmorPosition` 第四次重复 → 抽库；主节点更名收敛（armor_video_node 标注 P0 示例）。
