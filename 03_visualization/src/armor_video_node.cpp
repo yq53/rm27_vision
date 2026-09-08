@@ -1,3 +1,4 @@
+#include <iostream>
 #include <memory>
 
 #include <cv_bridge/cv_bridge.h>
@@ -37,11 +38,12 @@ public:
         if (fps <= 0)
             fps = 30.0;
 
-        pub_ = create_publisher<sensor_msgs::msg::Image>("armor/annotated", 10);
-        timer_ = create_wall_timer(
-            std::chrono::duration<double>(1.0 / fps),
-            std::bind(&ArmorVideoNode::onTimer, this)
-        );
+        // 传感器流数据用 SensorDataQoS(best_effort)：丢帧可接受、可靠性无意义，
+        // 且与 rqt/CLI 的 best_effort 订阅端完全对齐（兼容 CycloneDDS 等所有 RMW）
+        pub_ =
+            create_publisher<sensor_msgs::msg::Image>("armor/annotated", rclcpp::SensorDataQoS());
+        timer_ =
+            create_wall_timer(std::chrono::duration<double>(1.0 / fps), [this]() { onTimer(); });
         RCLCPP_INFO(get_logger(), "publishing /armor/annotated from %s", video_path.c_str());
     }
 
@@ -90,8 +92,15 @@ private:
 
 int main(int argc, char** argv) {
     rclcpp::init(argc, argv);
-    auto node = std::make_shared<ArmorVideoNode>();
-    rclcpp::spin(node);
+    try {
+        auto node = std::make_shared<ArmorVideoNode>();
+        rclcpp::spin(node);
+    } catch (const std::exception& e) {
+        // 节点构造失败（如视频/模型打不开）时友好报错，而不是裸 terminate
+        std::cerr << "[ERROR] " << e.what() << std::endl;
+        rclcpp::shutdown();
+        return -1;
+    }
     rclcpp::shutdown();
     return 0;
 }

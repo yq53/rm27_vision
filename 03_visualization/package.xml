@@ -3,7 +3,7 @@
 <package format="3">
   <name>rm_armor_visualization</name>
   <version>0.1.0</version>
-  <description>题3: 把题1 detector (+题2 tracker) 接入 ROS2，发布标注图像话题</description>
+  <description>题3: 把题1 detector + 题2 tracker 接入 ROS2，发布标注图像与跟踪状态</description>
   <maintainer email="yq@example.com">yq</maintainer>
   <license>MIT</license>
 
@@ -12,6 +12,7 @@
   <depend>rclcpp</depend>
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
   <depend>cv_bridge</depend>
 
   <export>

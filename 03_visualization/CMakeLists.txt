@@ -13,17 +13,25 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(OpenCV REQUIRED)
 
-# 复用题1 的检测器库（纯 CMake 工程，用 add_subdirectory 引入）
-add_subdirectory(../01_detector 01_detector EXCLUDE_FROM_ALL)
+# 复用题2 工程（内部引入 01_detector 的 armor_detector，并提供 armor_ekf）
+add_subdirectory(../02_tracker 02_tracker EXCLUDE_FROM_ALL)
 
 # P0：视频 -> detector -> 发布标注图像话题
 add_executable(armor_video_node src/armor_video_node.cpp)
 ament_target_dependencies(armor_video_node rclcpp sensor_msgs std_msgs cv_bridge)
 target_link_libraries(armor_video_node armor_detector ${OpenCV_LIBS})
 
-install(TARGETS armor_video_node DESTINATION lib/${PROJECT_NAME})
+# P1：detect -> PnP -> EKF -> 发布 /armor/pose + /armor/twist + 标注图
+add_executable(armor_tracker_node src/armor_tracker_node.cpp)
+ament_target_dependencies(
+  armor_tracker_node rclcpp sensor_msgs std_msgs geometry_msgs cv_bridge
+)
+target_link_libraries(armor_tracker_node armor_detector armor_ekf ${OpenCV_LIBS})
+
+install(TARGETS armor_video_node armor_tracker_node DESTINATION lib/${PROJECT_NAME})
 
 ament_package()
