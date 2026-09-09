@@ -14,6 +14,8 @@ find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
+find_package(tf2_ros REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(rm_interfaces REQUIRED)
@@ -36,6 +38,15 @@ ament_target_dependencies(
 )
 target_link_libraries(armor_tracker_node armor_detector armor_ekf camera_source ${OpenCV_LIBS})
 
-install(TARGETS armor_video_node armor_tracker_node DESTINATION lib/${PROJECT_NAME})
+# P0b：/armor/state -> TF(camera->armor) + MarkerArray（供 foxglove / rviz2 3D 展示）
+add_executable(armor_marker_node src/armor_marker_node.cpp)
+ament_target_dependencies(
+  armor_marker_node rclcpp geometry_msgs visualization_msgs tf2_ros rm_interfaces
+)
+
+install(
+  TARGETS armor_video_node armor_tracker_node armor_marker_node
+  DESTINATION lib/${PROJECT_NAME}
+)
 
 ament_package()
