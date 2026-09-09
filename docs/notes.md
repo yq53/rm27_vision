@@ -991,7 +991,7 @@ v2：框内**灯条精定位**（灯条端点 → 更准的四角点 → PnP 更
 ### 19.1 背景与路线（重来版）
 
 - **出题者原话**：他们实验室用海康相机；建议接 Hik SDK + 写 yaml 配参，现场"直接改一下相机序列号就行"，内参不要紧，重点看效果展示。
-- **复盘教训**：此前"04_camera 多后端抽象 + foxglove"范围失控、脱离掌控 → 已整体回退（revert c300e04），从最小实现重做，每步阅读+问答关口。
+- **复盘教训（归因修正 2026-09-10）**：回退的真正原因不是"抽象做重了"，而是 **foxglove 属未经确认就启动的新增项、且改动了稳定的主节点文件**——为保稳定版本才整体回退（revert c300e04）。正解是：过程可控（每步阅读+问答关口）+ 不无谓扰动稳定代码；封装/抽象本身是好东西。
 - **路线（最小实现，边做边学）**：
   - A ✅ hik_probe：链接 MVS SDK + 枚举相机（已完成，见 19.3）
   - B ⏳ 按 yaml 序列号点名打开 + 设曝光（无相机时学报错路径）
@@ -1074,3 +1074,16 @@ v2：框内**灯条精定位**（灯条端点 → 更准的四角点 → PnP 更
    - Mono8：单通道灰度 → `cv::Mat(h,w,CV_8UC1,pBufAddr)` 再 `cvtColor(COLOR_GRAY2BGR)`，目的：BGR8/Mono8 相机输出统一成 3 通道，下游永远按 CV_8UC3 处理。
    - **坑（已修）**：`MV_FRAME_OUT.pBufAddr` 在 5.0.2 是单指针；写 `pBufAddr[0]` 会变成"首字节数值"，被 `cv::Mat(...,const Scalar&)` 填色构造函数吞掉 → 纯色图且不报错。
 8. **命名小贴士**：好文件名/变量名应"不看代码即知其意"；`sn` 可换 `serial` 更直白，两者皆规范。
+
+### 19.8 D 步交付（ImageSource 接口版，2026-09-10：最终交付形态）
+
+- **设计选型（用户拍板走 C++ 风格）**：主节点用**纯 C++ 多态**，零预处理分支——
+  - 接口 `ImageSource`（永远编译、不依赖海康）：`read(cv::Mat&)/isOpened()/fpsHint()`；
+  - `VideoSource`（包装 cv::VideoCapture，含文件回卷）与 `HikSource`（实现同一接口）都是它的实现；
+  - 工厂 `createImageSource(SourceConfig)` 是唯一"选谁"的地方，海康专属代码整体藏在 `image_source.cpp` 的 `#ifdef RM_USE_HIK_SDK` 段内（编译开关只护住它自己，不再泄漏进主节点）。
+- **开关与依赖**：CMake `option(USE_HIK_SDK)`（默认 OFF）→ 默认构建零 MVS/yaml 依赖；ON 时链接 MVS+yaml-cpp（`colcon build --cmake-args -DUSE_HIK_SDK=ON`）。
+- **配置**：`data/camera.yaml`（backend: hik|video + serial_number/exposure_time_us/gain）；主节点新增可选参数 `camera_config`，**不传 = 原 video_path 行为不变**（yaml 为空时默认构造 video 配置走 VideoSource）。
+- **HikSource**：枚举→按序列号点名→CreateHandle/OpenDevice→关自动曝光+设曝光/增益→StartGrabbing→GetImageBuffer(BGR8 直拷 / Mono8 cvtColor)→FreeImageBuffer；析构自动逐层收尾。
+- **实测（本机，重构后重跑）**：T1 旧用法 / T2 camera_config+backend=video / T3 camera_config+backend=hik 无相机（`[hik_source] 未发现相机` + `[ERROR] hik 相机打开失败`，优雅退出）三路径通过。
+- **现场流程**：MVS 客户端查 SN → 填 `data/camera.yaml` 的 `serial_number` → `colcon build --cmake-args -DUSE_HIK_SDK=ON` → `export LD_LIBRARY_PATH=/opt/MVS/lib/64` → `ros2 run ... -p camera_config:=data/camera.yaml`。
+- **教训沉淀（用户原话修正）**：C 风格代码只该出现在"薄薄包住厂商 C SDK"的那一层；上层（节点/算法）用现代 C++（RAII/接口/多态），SDK 的 C 味道不传染上层。

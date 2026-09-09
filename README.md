@@ -16,10 +16,12 @@
 ```
 rm27_vision/
 ├── models/               # ONNX 模型（训练工程在工作区 trainning/，不入仓库）
-├── data/                 # 测试素材 data/demo.avi（自瞄演示视频 1440x1080@30fps，只作测试，永不进训练集）
+├── data/                 # 测试素材 demo.avi + camera.yaml（相机配置，现场只改 serial_number）
+
 ├── 01_detector/          # 题1：装甲板识别器（armor_detector 库 + armor_demo 演示）
 ├── 02_tracker/           # 题2：装甲板跟踪器（armor_ekf 库 + 学习用 demo）
 ├── 03_visualization/     # 题3：ROS2 主节点 armor_tracker_node + P0 示例 armor_video_node
+├── 04_hik/              # Hik SDK 学习 demo（probe/open/grab，不参与主构建）
 ├── rm_interfaces/        # 自定义消息接口包（ArmorState.msg）
 ├── docs/
 │   ├── notes.md          # 学习笔记（原理问答 + 踩坑日志 + 工作记录）
@@ -148,6 +150,12 @@ export RMW_IMPLEMENTATION=rmw_fastrtps_cpp   # 本机必用 FastDDS（见上）
 
 # 终端1：视频源（循环播放）
 ros2 run rm_armor_visualization armor_tracker_node --ros-args -p video_path:=data/demo.avi
+
+# 终端1''：海康相机（现场：改 data/camera.yaml 的 serial_number 即可）
+#   需先以 USE_HIK_SDK=ON 构建：
+#   colcon build --packages-up-to rm_armor_visualization --cmake-args -DUSE_HIK_SDK=ON
+#   运行时: export LD_LIBRARY_PATH=/opt/MVS/lib/64:$LD_LIBRARY_PATH
+ros2 run rm_armor_visualization armor_tracker_node --ros-args -p camera_config:=data/camera.yaml
 
 # 终端1'：真实相机（手机 IP Webcam——必须横屏！地址以 App 显示为准）
 ros2 run rm_armor_visualization armor_tracker_node \

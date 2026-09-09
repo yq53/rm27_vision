@@ -11,6 +11,7 @@
 
 #include "armor_detector/armor_detector.hpp"
 #include "armor_ekf/armor_ekf.hpp"
+#include "image_source.hpp"
 #include "rm_interfaces/msg/armor_state.hpp"
 
 using rm_interfaces::msg::ArmorState;
@@ -123,6 +124,10 @@ bool solveArmorPosition(
 class ArmorTrackerNode: public rclcpp::Node {
 public:
     ArmorTrackerNode(): Node("armor_tracker_node") {
+        // 图像源：camera_config 非空 -> 读 camera.yaml 经工厂选源（hik/video）；
+        //        为空          -> 默认构造 video 配置，维持旧 video_path 行为。
+        const std::string camera_config =
+            declare_parameter<std::string>("camera_config", "");
         const std::string video_path =
             declare_parameter<std::string>("video_path", "data/demo.avi");
         const std::string model_path =
@@ -132,11 +137,19 @@ public:
         detector_->setConfidenceThreshold(0.35f);
         detector_->setNmsThreshold(0.45f);
 
-        capture_.open(video_path);
-        if (!capture_.isOpened()) {
-            throw std::runtime_error("cannot open video: " + video_path);
+        rm_vision::SourceConfig cfg;
+        cfg.video_path = video_path; // 无 yaml 时沿用 video_path 参数
+        if (!camera_config.empty()) {
+            cfg = rm_vision::loadSourceConfig(camera_config);
         }
-        double fps = capture_.get(cv::CAP_PROP_FPS);
+        source_ = rm_vision::createImageSource(cfg); // hik 打开失败会抛异常
+        if (!source_ || !source_->isOpened()) {
+            throw std::runtime_error(
+                "cannot open camera source: " + (camera_config.empty() ? video_path : camera_config)
+            );
+        }
+
+        double fps = source_->fpsHint();
         if (fps <= 0) {
             fps = 30.0;
         }
@@ -154,11 +167,8 @@ private:
     // 计时器callback函数
     void onTimer() {
         cv::Mat frame;
-        if (!capture_.read(frame)) {
-            capture_.set(cv::CAP_PROP_POS_FRAMES, 0);
-            if (!capture_.read(frame)) {
-                return;
-            }
+        if (!source_->read(frame)) {
+            return; // 回卷/超时已由具体源内部处理
         }
 
         const std::vector<Armor> armors = detector_->detect(frame);
@@ -236,7 +246,7 @@ private:
     }
 
     std::unique_ptr<ArmorDetector> detector_;
-    cv::VideoCapture capture_;
+    std::unique_ptr<rm_vision::ImageSource> source_; // 图像源（video/hik 由工厂决定）
     ArmorEKF ekf_;
     double dt_ = 1.0 / 30.0;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr img_pub_;
