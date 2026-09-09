@@ -84,3 +84,40 @@ ros2 run rqt_image_view rqt_image_view /armor/annotated
 
 > 沙箱环境提示：若 `~/.ros` 只读导致日志失败，先 `export ROS_LOG_DIR=$PWD/.roslog`。
 > 参数：`video_path`（默认 data/demo.avi）、`model_path`（默认 models/armor_yolov8n.onnx）、`loop`（默认 true）。
+
+> ⚠️ 环境备注：本机默认 RMW 为 CycloneDDS，传输大图像消息不稳定（大量 "message lost"，rqt 无画面）。
+> **请使用 FastDDS**：`export RMW_IMPLEMENTATION=rmw_fastrtps_cpp`（建议写入 `~/.bashrc`）。
+
+---
+
+## 题2 / 题3 完成状态（2026-09-08）
+
+- **题2 tracker**：✅ v1 完成（detect→PnP→EKF 平滑，离线 `tracker_demo`：抖动 0.042→0.020 m）；v2 灯条精定位为探索原型（实验记录见 `docs/notes.md` 第 17 节）。
+- **题3 ROS2 接入**：✅ P0/P1 完成——主节点发布**单条自定义状态** `/armor/state` + 标注图 `/armor/annotated`；真实相机（手机 IP Webcam）已验证。
+
+### 题3 主节点运行（完整链路，推荐）
+
+```bash
+# 构建
+source /opt/ros/humble/setup.bash
+colcon build --packages-up-to rm_armor_visualization
+source install/setup.bash
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp   # 本机需 FastDDS（见下）
+
+# 终端1：视频源 demo
+ros2 run rm_armor_visualization armor_tracker_node --ros-args -p video_path:=data/demo.avi
+
+# 终端1'：真实相机（手机 IP Webcam，地址以 App 显示为准，必须横屏！）
+ros2 run rm_armor_visualization armor_tracker_node \
+    --ros-args -p video_path:=http://<手机IP>:8080/video
+
+# 终端2：查看
+ros2 topic echo /armor/state --once
+ros2 run rqt_image_view rqt_image_view /armor/annotated
+```
+
+**说明**：
+- `rm_interfaces`：独立接口包，定义 `ArmorState.msg`（header+position+velocity+distance）。
+- 节点角色：`armor_tracker_node`=主节点（完整链路）；`armor_video_node`=P0 学习示例（仅 detector）。
+- **内参为演示级近似**（按分辨率 + 假定 HFOV≈72° 推导，未标定）→ 距离量级可信、绝对精度需棋盘标定；手机**必须横屏**（竖屏因旋转元数据会产生镜像假解）。
+- 证据截图：`docs/screenshots/`（如有）。

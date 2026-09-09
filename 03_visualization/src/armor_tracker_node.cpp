@@ -20,23 +20,24 @@ using rm_vision::ArmorDetector;
 
 namespace {
 
-constexpr double kFx = 1000.0;
-constexpr double kFy = 1000.0;
-constexpr double kCx = 720.0;
-constexpr double kCy = 540.0;
 constexpr double kPlateW = 0.135;
 constexpr double kPlateH = 0.125;
 
-cv::Mat cameraMatrix() {
-    return (cv::Mat_<double>(3, 3) << kFx, 0, kCx, 0, kFy, kCy, 0, 0, 1);
+// 内参按"当前分辨率 + 假定水平 FOV≈72°"推导：fx=(w/2)/tan(HFOV/2)，cx/cy 取中心。
+// 演示级近似；真实部署需棋盘格标定替换。
+cv::Mat computeK(int width, int height) {
+    const double fx = width / (2.0 * std::tan(36.0 * CV_PI / 180.0));
+    return (cv::Mat_<double>(3, 3) << fx, 0, width / 2.0, 0, fx, height / 2.0, 0, 0, 1);
 }
 
+// 板坐标系角点
 std::vector<cv::Point3d> plateObjectPoints() {
     const double hw = kPlateW / 2;
     const double hh = kPlateH / 2;
     return { { -hw, -hh, 0 }, { hw, -hh, 0 }, { hw, hh, 0 }, { -hw, hh, 0 } };
 }
 
+// 获取四角点
 std::vector<cv::Point2d> rectToCorners(const cv::Rect& rect) {
     const double x0 = rect.x;
     const double y0 = rect.y;
@@ -45,14 +46,16 @@ std::vector<cv::Point2d> rectToCorners(const cv::Rect& rect) {
     return { { x0, y0 }, { x1, y0 }, { x1, y1 }, { x0, y1 } };
 }
 
+// 求解板心位置z
 bool solveArmorPosition(
     const std::vector<cv::Point3d>& object,
     const std::vector<cv::Point2d>& image,
+    const cv::Mat& K,
     cv::Mat& z3x1
 ) {
     auto reproj_err = [&](const cv::Mat& rvec, const cv::Mat& tvec) {
         std::vector<cv::Point2d> proj;
-        cv::projectPoints(object, rvec, tvec, cameraMatrix(), cv::noArray(), proj);
+        cv::projectPoints(object, rvec, tvec, K, cv::noArray(), proj);
         double sum = 0.0;
         for (size_t i = 0; i < image.size(); ++i) {
             const cv::Point2d d = proj[i] - image[i];
@@ -65,7 +68,7 @@ bool solveArmorPosition(
         cv::solvePnPGeneric(
             object,
             image,
-            cameraMatrix(),
+            K,
             cv::noArray(),
             rvecs,
             tvecs,
@@ -98,7 +101,16 @@ bool solveArmorPosition(
         if (best_idx < 0 || best > 10.0) {
             return false;
         }
-        z3x1 = tvecs[best_idx].clone();
+        // 物理合理性闸门：板须在相机前方(z>0)且距离合理(<20m)，否则视为伪解丢弃
+        const cv::Mat& tv = tvecs[best_idx];
+        const double z = tv.at<double>(2);
+        const double dist = std::sqrt(
+            tv.at<double>(0) * tv.at<double>(0) + tv.at<double>(1) * tv.at<double>(1) + z * z
+        );
+        if (!(z > 0.2 && dist < 20.0)) {
+            return false;
+        }
+        z3x1 = tv.clone();
         return true;
     } catch (const cv::Exception&) {
         return false;
@@ -139,6 +151,7 @@ public:
     }
 
 private:
+    // 计时器callback函数
     void onTimer() {
         cv::Mat frame;
         if (!capture_.read(frame)) {
@@ -150,6 +163,8 @@ private:
 
         const std::vector<Armor> armors = detector_->detect(frame);
         const Armor* target = nullptr;
+
+        // 取最大面积目标
         double max_area = 0.0;
         for (const Armor& a: armors) {
             if (a.rect.area() > max_area) {
@@ -160,12 +175,14 @@ private:
 
         ekf_.predict(dt_);
 
+        // PnP求解目标板中心位姿
         cv::Mat z3x1;
         bool have_measure = false;
         if (target != nullptr) {
             cv::rectangle(frame, target->rect, cv::Scalar(0, 255, 0), 2);
+            const cv::Mat K = computeK(frame.cols, frame.rows);
             have_measure =
-                solveArmorPosition(plateObjectPoints(), rectToCorners(target->rect), z3x1);
+                solveArmorPosition(plateObjectPoints(), rectToCorners(target->rect), K, z3x1);
         }
 
         if (have_measure) {
@@ -179,6 +196,7 @@ private:
         if (ekf_.initialized()) {
             const cv::Mat& x = ekf_.state();
 
+            // 组织ArmorState信息
             ArmorState msg;
             msg.header.stamp = now();
             msg.header.frame_id = "camera";
@@ -192,7 +210,7 @@ private:
                 msg.position.x * msg.position.x + msg.position.y * msg.position.y
                 + msg.position.z * msg.position.z
             );
-            state_pub_->publish(msg);
+            state_pub_->publish(msg); // 发布状态信息
 
             cv::putText(
                 frame,
