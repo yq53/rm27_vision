@@ -1,9 +1,6 @@
 # 构建产物
 build/
 
-# 运行输出
-results/
-
 # 编译中间文件
 *.o
 
@@ -12,6 +9,13 @@ results/
 .cache/
 .DS_Store
 compile_commands.json
+
+# ROS2 构建与日志（colcon / ros2 运行）
 install/
 log/
 .roslog/
+
+# 运行输出：results/ 下的 *.avi / *.png 均为程序生成物，不入库
+results/*
+# 例外：真实相机验证录屏是提交证据，需入库（README 引用此文件）
+!results/real_camera_2026-09-09.mkv
