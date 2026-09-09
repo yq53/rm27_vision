@@ -1056,3 +1056,21 @@ v2：框内**灯条精定位**（灯条端点 → 更准的四角点 → PnP 更
   - `cv::Mat` 包的是 SDK 缓冲区的**引用**，`imwrite` 会自己拷贝所以安全；若把 Mat 存下来跨帧用必须先 `clone()`。
 - 验证：本机编译通过、无相机路径枚举 0 台退出 0；**取流与格式转换需现场真机验证**（C 步本就是"真机前最后一公里"）。
 - 下一步 D：把 C 步这段收敛成"海康取流模块"，并入 armor_tracker_node（yaml 选源，老用法不变）。
+- **Bug 修复（同批提交）**：`MV_FRAME_OUT.pBufAddr` 在 MVS 5.0.2 里是**单个指针**（老 SDK 是 `pBufAddr[8]` 数组，网上示例多为 `[0]`）。原来写 `pBufAddr[0]` 会把"帧数据指针"变成"首字节数值"，被 `cv::Mat(...,const Scalar&)` **填色构造函数**悄悄接走 → 真机将得到纯色图且不报错（已用最小复现验证：a.data!=buf、内容=纯色）。修正：直接传 `frame_out.pBufAddr`。
+
+### 19.7 概念问答沉淀（C 步前后：相机成像 / 命名 / 取帧容器 / 像素格式）
+
+1. **相机成像三参数（为什么"关自动、设固定"）**
+   - 曝光 = 感光元件收集光的过程；曝光时间 = 收集时长（越长越亮，但运动目标会拖影；海康单位 µs，`2000.0`=2ms）。
+   - 增益 Gain = 把信号放大的倍数（越大越亮，但**噪声同步放大**，信噪比变差；单位 dB）。原则：先加曝光时间（真信号），不够再用增益。
+   - 自动曝光 = 相机按画面平均亮度自行调节。**自瞄要关掉**：亮度会随目标/背景乱跳 → 检测输入不稳定、灯条易过曝、且不可复现。固定曝光+增益 → 每帧一致、现场可调、效果可复现。
+2. **MV_CC_ 前缀** = **MV**achine Vision + **C**amera **C**ontrol（机器视觉·相机控制）。C 接口无命名空间，各厂商用前缀防冲突（如海康威视安防 `NET_DVR_*`）；看前缀即知是哪家/哪模块。库名 `MvCameraControl` = 去 lib 前缀与 .so 后缀。
+3. **命名习惯**：`sn` = Serial Number（序列号缩写）；probe=探针(验环境) / open=打开(点名+开设备) / grab=抓帧(取流)——三个程序名就是 SDK 生命周期台阶名。
+4. **参数配置的一致性教训**：hik_open 设了 Gain 但没先关 GainAuto（可能被覆盖）；hik_grab 干脆漏了 Gain（简化疏漏）。本版 SDK 无 `MV_GAIN_AUTO_MODE_OFF` 常量 → 关自动增益待现场用 `SetEnumValueByString("GainAuto","Off")` 或枚举值 0 核对。**结论：参数配置应收敛为 D 步的统一参数表，不再每个 demo 各写各的**。
+5. **IN / OUT 方向标注**：头文件给参数贴的文档标签（`IN`=函数读入、`OUT`=函数写回、`IN OUT`=双向），不是类型；`MV_FRAME_OUT` 名字里的 OUT 表示"用于接收输出的一帧"。
+6. **MV_CC_GetImageBuffer(handle, &frame_out, 1000)**：阻塞最多 1000ms（超时上限，非数据量）从 SDK 帧缓冲取一帧 → 填 `frame_out`（数据在 `pBufAddr`、信息在 `stFrameInfo`）；用完必须 `FreeImageBuffer` 归还。
+7. **像素格式与 Mat 包装**：
+   - BGR8_Packed：每像素 3 字节按 B,G,R（=OpenCV Mat 默认序）→ 直接 `cv::Mat(h,w,CV_8UC3,pBufAddr)`；
+   - Mono8：单通道灰度 → `cv::Mat(h,w,CV_8UC1,pBufAddr)` 再 `cvtColor(COLOR_GRAY2BGR)`，目的：BGR8/Mono8 相机输出统一成 3 通道，下游永远按 CV_8UC3 处理。
+   - **坑（已修）**：`MV_FRAME_OUT.pBufAddr` 在 5.0.2 是单指针；写 `pBufAddr[0]` 会变成"首字节数值"，被 `cv::Mat(...,const Scalar&)` 填色构造函数吞掉 → 纯色图且不报错。
+8. **命名小贴士**：好文件名/变量名应"不看代码即知其意"；`sn` 可换 `serial` 更直白，两者皆规范。

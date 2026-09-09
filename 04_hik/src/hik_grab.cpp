@@ -24,6 +24,7 @@ void printRet(const char* what, int ret) {
     }
 }
 
+// 获取序列号
 std::string serialOf(const MV_CC_DEVICE_INFO* dev) {
     if (dev == nullptr) {
         return "";
@@ -41,6 +42,7 @@ std::string serialOf(const MV_CC_DEVICE_INFO* dev) {
     return "";
 }
 
+// 获取像素类型
 const char* pixelName(unsigned int type) {
     if (type == PixelType_Gvsp_BGR8_Packed) {
         return "BGR8";
@@ -57,12 +59,14 @@ int main(int argc, char** argv) {
     const std::string want = (argc > 1) ? argv[1] : "000000000000";
     const int want_frames = (argc > 2) ? std::stoi(argv[2]) : 30;
 
+    // 初始化
     int ret = MV_CC_Initialize();
     printRet("MV_CC_Initialize", ret);
     if (ret != MV_OK) {
         return 1;
     }
 
+    // 获取设备列表
     MV_CC_DEVICE_INFO_LIST list;
     std::memset(&list, 0, sizeof(list));
     ret = MV_CC_EnumDevices(MV_GIGE_DEVICE | MV_USB_DEVICE, &list);
@@ -79,6 +83,7 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    // 遍历设备列表，找寻目标设备
     int idx = -1;
     for (unsigned int i = 0; i < list.nDeviceNum; ++i) {
         const std::string sn = serialOf(list.pDeviceInfo[i]);
@@ -93,6 +98,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // 创建句柄并绑定给设备
     void* handle = nullptr;
     ret = MV_CC_CreateHandle(&handle, list.pDeviceInfo[idx]);
     printRet("MV_CC_CreateHandle", ret);
@@ -108,6 +114,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // 关闭自动曝光、手动设置曝光时间
     ret = MV_CC_SetEnumValue(handle, "ExposureAuto", MV_EXPOSURE_AUTO_MODE_OFF);
     ret = MV_CC_SetFloatValue(handle, "ExposureTime", 2000.0);
     printRet("设曝光", ret);
@@ -146,9 +153,9 @@ int main(int argc, char** argv) {
         // 原始数据只包不拷贝（零成本）；需要保存/继续处理时再 clone
         cv::Mat frame;
         if (info.enPixelType == PixelType_Gvsp_BGR8_Packed) {
-            frame = cv::Mat(info.nHeight, info.nWidth, CV_8UC3, frame_out.pBufAddr[0]);
+            frame = cv::Mat(info.nHeight, info.nWidth, CV_8UC3, frame_out.pBufAddr);
         } else if (info.enPixelType == PixelType_Gvsp_Mono8) {
-            cv::Mat gray(info.nHeight, info.nWidth, CV_8UC1, frame_out.pBufAddr[0]);
+            cv::Mat gray(info.nHeight, info.nWidth, CV_8UC1, frame_out.pBufAddr);
             cv::cvtColor(gray, frame, cv::COLOR_GRAY2BGR);
         } else {
             std::printf("  不支持的像素格式，跳过本帧\n");
