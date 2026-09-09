@@ -11,7 +11,6 @@
 
 #include "armor_detector/armor_detector.hpp"
 #include "armor_ekf/armor_ekf.hpp"
-#include "camera_source/camera_source.hpp"
 #include "rm_interfaces/msg/armor_state.hpp"
 
 using rm_interfaces::msg::ArmorState;
@@ -124,11 +123,6 @@ bool solveArmorPosition(
 class ArmorTrackerNode: public rclcpp::Node {
 public:
     ArmorTrackerNode(): Node("armor_tracker_node") {
-        // 图像源二选一：
-        //   1) camera_config 非空：读 camera.yaml -> CameraSource 工厂（video/ip/hik，现场只改序列号）
-        //   2) 否则：维持旧行为，按 video_path 直接打开（文件循环 / IP 流 / 本地相机）
-        const std::string camera_config =
-            declare_parameter<std::string>("camera_config", "");
         const std::string video_path =
             declare_parameter<std::string>("video_path", "data/demo.avi");
         const std::string model_path =
@@ -138,29 +132,11 @@ public:
         detector_->setConfidenceThreshold(0.35f);
         detector_->setNmsThreshold(0.45f);
 
-        std::string source_desc = video_path;
-        if (!camera_config.empty()) {
-            const rm_camera::CameraConfig cfg = rm_camera::loadCameraConfig(camera_config);
-            cam_ = rm_camera::openCamera(cfg);
-            source_desc = "yaml(" + cfg.backend + ")";
-            RCLCPP_INFO(
-                get_logger(),
-                "图像源来自 camera_config: %s（backend=%s, serial=%s）",
-                camera_config.c_str(),
-                cfg.backend.c_str(),
-                cfg.serial_number.empty() ? "-" : cfg.serial_number.c_str()
-            );
-        } else {
-            rm_camera::CameraConfig cfg;
-            cfg.backend = "video";
-            cfg.video_path = video_path;
-            cfg.loop = true; // 与旧实现一致：文件到尾自动回卷
-            cam_ = rm_camera::openCamera(cfg);
+        capture_.open(video_path);
+        if (!capture_.isOpened()) {
+            throw std::runtime_error("cannot open video: " + video_path);
         }
-        if (!cam_ || !cam_->isOpened()) {
-            throw std::runtime_error("cannot open camera source: " + source_desc);
-        }
-        double fps = cam_->get(cv::CAP_PROP_FPS);
+        double fps = capture_.get(cv::CAP_PROP_FPS);
         if (fps <= 0) {
             fps = 30.0;
         }
@@ -178,8 +154,11 @@ private:
     // 计时器callback函数
     void onTimer() {
         cv::Mat frame;
-        if (!cam_->read(frame)) {
-            return; // 回卷在 CameraSource(video, loop) 内部处理
+        if (!capture_.read(frame)) {
+            capture_.set(cv::CAP_PROP_POS_FRAMES, 0);
+            if (!capture_.read(frame)) {
+                return;
+            }
         }
 
         const std::vector<Armor> armors = detector_->detect(frame);
@@ -257,7 +236,7 @@ private:
     }
 
     std::unique_ptr<ArmorDetector> detector_;
-    std::unique_ptr<rm_camera::CameraSource> cam_;
+    cv::VideoCapture capture_;
     ArmorEKF ekf_;
     double dt_ = 1.0 / 30.0;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr img_pub_;

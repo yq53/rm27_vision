@@ -16,15 +16,13 @@
 ```
 rm27_vision/
 ├── models/               # ONNX 模型（训练工程在工作区 trainning/，不入仓库）
-├── data/                 # 测试素材 demo.avi + camera.yaml（相机配置，现场只改 serial_number）
+├── data/                 # 测试素材 data/demo.avi（自瞄演示视频 1440x1080@30fps，只作测试，永不进训练集）
 ├── 01_detector/          # 题1：装甲板识别器（armor_detector 库 + armor_demo 演示）
 ├── 02_tracker/           # 题2：装甲板跟踪器（armor_ekf 库 + 学习用 demo）
 ├── 03_visualization/     # 题3：ROS2 主节点 armor_tracker_node + P0 示例 armor_video_node
-├── 04_camera/            # 相机接入抽象（video/ip/hik + camera.yaml，P0a 扩展）
 ├── rm_interfaces/        # 自定义消息接口包（ArmorState.msg）
 ├── docs/
 │   ├── notes.md          # 学习笔记（原理问答 + 踩坑日志 + 工作记录）
-│   ├── foxglove/         # Foxglove 布局文件（3D+图像+曲线 一键导入）
 │   └── screenshots/      # 运行效果截图（题1 预览 + 题3 真实相机证据）
 └── results/              # 运行输出（生成物不入库，唯一例外=证据录屏 real_camera_*.mkv）
 ```
@@ -32,7 +30,6 @@ rm27_vision/
 ## 环境与前置
 
 - Ubuntu 22.04 + ROS2 Humble + OpenCV 4.x + C++17（clang/GCC 均可）；ROS2 节点另需 `cv_bridge`。
-- 相机抽象层（04_camera）需要 `libyaml-cpp-dev`：`sudo apt install libyaml-cpp-dev`。
 - **RMW 必读**：本机默认 CycloneDDS 传大图像消息不稳定（rqt 无画面）→ 请用 FastDDS：
   `export RMW_IMPLEMENTATION=rmw_fastrtps_cpp`（建议写入 `~/.bashrc`）。
 - 程序约定在**仓库根目录**下运行（默认相对路径 `data/`、`models/`）。
@@ -44,7 +41,6 @@ rm27_vision/
 # A. 题1 / 题2（普通 CMake，OpenCV）
 cmake -S 01_detector -B build/01_detector -DCMAKE_BUILD_TYPE=Release && cmake --build build/01_detector -j
 cmake -S 02_tracker -B build/02_tracker -DCMAKE_BUILD_TYPE=Release && cmake --build build/02_tracker -j
-cmake -S 04_camera -B build/04_camera -DCMAKE_BUILD_TYPE=Release && cmake --build build/04_camera -j   # 探针 demo（可选）
 
 # B. 题3（ROS2 colcon；rm_interfaces 会被自动带上）
 source /opt/ros/humble/setup.bash
@@ -52,7 +48,7 @@ colcon build --packages-up-to rm_armor_visualization
 source install/setup.bash
 ```
 
-> 02_tracker 复用 01_detector；03_visualization 通过 `add_subdirectory` 内部复用 02_tracker 与 04_camera，无需单独安装。
+> 02_tracker / 03_visualization 通过 `add_subdirectory` 内部复用 `01_detector`，无需单独安装。
 
 ---
 
@@ -157,9 +153,6 @@ ros2 run rm_armor_visualization armor_tracker_node --ros-args -p video_path:=dat
 ros2 run rm_armor_visualization armor_tracker_node \
     --ros-args -p video_path:=http://<手机IP>:8080/video
 
-# 终端1''：yaml 相机模式（海康现场：改 data/camera.yaml 的 serial_number 即可）
-ros2 run rm_armor_visualization armor_tracker_node --ros-args -p camera_config:=data/camera.yaml
-
 # 终端2：查看状态与标注图
 ros2 topic echo /armor/state --once
 ros2 run rqt_image_view rqt_image_view /armor/annotated
@@ -167,23 +160,6 @@ ros2 run rqt_image_view rqt_image_view /armor/annotated
 
 > 手机流地址**必须带 `/video`**（裸地址是网页，VideoCapture 打不开）；竖屏会产生 90° 旋转元数据 → PnP 镜像假解（z<0），**务必横屏**。
 > `armor_video_node` 用法相同，仅发布标注图（参数 `video_path/model_path/loop`，默认 loop=true）。
-
-### Foxglove 3D/图像/曲线可视化（P0b，2026-09-09）
-
-一键布局：`docs/foxglove/rm27_vision_layout.json`（Image=`/armor/annotated` + 3D + Plot=`/armor/state.distance`）。
-
-```bash
-# 终端1：主节点（video / ip / camera.yaml 均可）
-ros2 run rm_armor_visualization armor_tracker_node --ros-args -p video_path:=data/demo.avi
-# 终端2（可选，3D 位姿球）：发布 TF camera->armor + MarkerArray
-ros2 run rm_armor_visualization armor_marker_node
-# 终端3：ROS2 <-> Foxglove 桥
-ros2 run foxglove_bridge foxglove_bridge
-```
-
-- Foxglove Studio（或 app.foxglove.dev）→ `Open connection` → `ws://localhost:8765` → 导入上述布局；
-- 3D 面板固定坐标系为 `camera`；若要看板位姿球，需在 3D 面板侧栏把 TF / Marker 图层打开，并确保终端2 的 `armor_marker_node` 在跑；
-- 需要 `ros-humble-foxglove-bridge`（`sudo apt install ros-humble-foxglove-bridge`）。
 
 ### 真实相机验证证据（2026-09-09）
 
