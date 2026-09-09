@@ -1,0 +1,16 @@
+backend: video            # video | ip | hik
+# ===== backend: video（本地文件，无相机自测）=====
+video_path: data/demo.avi
+loop: true
+# ===== backend: ip（网络流，如手机 IP Webcam——必须横屏）=====
+# ip_url: http://192.168.1.10:8080/video
+# ===== backend: hik（现场接入海康相机时，只改 serial_number 即可）=====
+serial_number: ""
+# ---- 图像参数 ----
+width: 1280
+height: 720
+# ---- 曝光/增益（hik 后端生效；video/ip 忽略）----
+exposure_auto: true
+exposure_time_us: 2000.0
+gain_auto: true
+gain: 8.0
