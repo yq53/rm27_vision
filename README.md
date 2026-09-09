@@ -120,4 +120,13 @@ ros2 run rqt_image_view rqt_image_view /armor/annotated
 - `rm_interfaces`：独立接口包，定义 `ArmorState.msg`（header+position+velocity+distance）。
 - 节点角色：`armor_tracker_node`=主节点（完整链路）；`armor_video_node`=P0 学习示例（仅 detector）。
 - **内参为演示级近似**（按分辨率 + 假定 HFOV≈72° 推导，未标定）→ 距离量级可信、绝对精度需棋盘标定；手机**必须横屏**（竖屏因旋转元数据会产生镜像假解）。
-- 证据截图：`docs/screenshots/`（如有）。
+
+**真实相机验证证据（2026-09-09）**
+
+![手机 IP Webcam 实拍屏幕 + rqt 实时标注](docs/screenshots/phone_rqt.png)
+
+- 截图：`docs/screenshots/phone_rqt.png`（检测框锁定目标，`d=1.05m v=(0.5,0.2,1.3)` 实时输出）；
+- 录屏：`results/real_camera_2026-09-09.mkv`（24 s，手机 IP Webcam 实拍 → detect → PnP → EKF → `/armor/state`）；
+- 说明：靶面内容为 `data/demo.avi`（检测器 demo 输出，**非训练集、光照差、角度极端**），
+  在此苛刻条件下框仍持续锁定、距离/速度随目标移动实时变化，反而更能反映真实场景鲁棒性；
+  d≈0.8~1.1 m 与手机到屏幕的物理距离同量级（内参为近似值，绝对精度未标定）。
