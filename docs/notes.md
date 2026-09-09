@@ -1044,3 +1044,15 @@ v2：框内**灯条精定位**（灯条端点 → 更准的四角点 → PnP 更
    - `CreateHandle`↔`DestroyHandle`：会话资源（办卡/销卡）
    - `OpenDevice`↔`CloseDevice`：连接占用（进门/退房）——**CloseDevice 只断连不销毁**，GigE 掉线后可 Close→Open 重连（handle 仍有效）
    - 完整顺序：Initialize→Enum→CreateHandle→OpenDevice→(C 步 Start/StopGrabbing)→CloseDevice→DestroyHandle→Finalize；**错误路径也要逐层收尾**。
+
+### 19.6 C 步交付（hik_grab，2026-09-10：取流 → OpenCV BGR）
+
+- 流程：B 步(枚举→点名→打开→设参) + `MV_CC_StartGrabbing` → 循环 `MV_CC_GetImageBuffer`/`MV_CC_FreeImageBuffer` → 按 `stFrameInfo.enPixelType` 处理 → `MV_CC_StopGrabbing`。
+- 像素格式处理：`PixelType_Gvsp_BGR8_Packed` 直接 `cv::Mat(h,w,CV_8UC3,pBufAddr[0])` 包（零拷贝，仅引用）；`PixelType_Gvsp_Mono8` 先包 `CV_8UC1` 再 `cvtColor(GRAY2BGR)`。首帧 `imwrite` 到 `results/hik_grab_0000.png`。
+- **关键点/踩坑**：
+  - `MV_CC_GetImageBuffer` 返回的帧数据**由 SDK 管理，用完必须 `MV_CC_FreeImageBuffer` 归还**（成对，否则内部缓冲被耗尽）；
+  - 本版 SDK(5.0.2) 的 `MV_CC_GetOneFrameTimeout` 签名与旧文档不同（自备 `pData/nDataSize` 缓冲版）→ 本工程统一走 `GetImageBuffer/FreeImageBuffer` 路线；
+  - 取帧信息在 `frame_out.stFrameInfo`（`nWidth/nHeight/enPixelType`），数据指针在 `frame_out.pBufAddr[0]`；
+  - `cv::Mat` 包的是 SDK 缓冲区的**引用**，`imwrite` 会自己拷贝所以安全；若把 Mat 存下来跨帧用必须先 `clone()`。
+- 验证：本机编译通过、无相机路径枚举 0 台退出 0；**取流与格式转换需现场真机验证**（C 步本就是"真机前最后一公里"）。
+- 下一步 D：把 C 步这段收敛成"海康取流模块"，并入 armor_tracker_node（yaml 选源，老用法不变）。

@@ -22,6 +22,8 @@ if(NOT EXISTS "${MVS_INCLUDE_DIR}/MvCameraControl.h")
     message(FATAL_ERROR "找不到 ${MVS_INCLUDE_DIR}/MvCameraControl.h，请先安装 MVS SDK 或 -DMVS_SDK_DIR=...")
 endif()
 
+find_package(OpenCV REQUIRED)
+
 add_executable(hik_probe src/hik_probe.cpp)
 target_include_directories(hik_probe PRIVATE ${MVS_INCLUDE_DIR})
 target_link_directories(hik_probe PRIVATE ${MVS_LIB_DIR})
@@ -32,6 +34,12 @@ add_executable(hik_open src/hik_open.cpp)
 target_include_directories(hik_open PRIVATE ${MVS_INCLUDE_DIR})
 target_link_directories(hik_open PRIVATE ${MVS_LIB_DIR})
 target_link_libraries(hik_open PRIVATE MvCameraControl)
+
+# C 步：取流 + 转 OpenCV BGR（hik_grab）
+add_executable(hik_grab src/hik_grab.cpp)
+target_include_directories(hik_grab PRIVATE ${MVS_INCLUDE_DIR})
+target_link_directories(hik_grab PRIVATE ${MVS_LIB_DIR})
+target_link_libraries(hik_grab PRIVATE MvCameraControl ${OpenCV_LIBS})
 
 # 运行提示：程序运行时需要能"找到" .so（动态库是运行时才加载的）
 #   cmake 之外执行: export LD_LIBRARY_PATH=/opt/MVS/lib/64:$LD_LIBRARY_PATH
