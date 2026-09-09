@@ -23,12 +23,15 @@ if(NOT EXISTS "${MVS_INCLUDE_DIR}/MvCameraControl.h")
 endif()
 
 add_executable(hik_probe src/hik_probe.cpp)
-
-# 编译期：-I 头文件目录（编译器遇到 #include "MvCameraControl.h" 时去这里找）
 target_include_directories(hik_probe PRIVATE ${MVS_INCLUDE_DIR})
-# 链接期：告诉链接器去哪里找 .so，并链接 MvCameraControl
 target_link_directories(hik_probe PRIVATE ${MVS_LIB_DIR})
 target_link_libraries(hik_probe PRIVATE MvCameraControl)
+
+# B 步：按序列号打开相机 + 设曝光/增益
+add_executable(hik_open src/hik_open.cpp)
+target_include_directories(hik_open PRIVATE ${MVS_INCLUDE_DIR})
+target_link_directories(hik_open PRIVATE ${MVS_LIB_DIR})
+target_link_libraries(hik_open PRIVATE MvCameraControl)
 
 # 运行提示：程序运行时需要能"找到" .so（动态库是运行时才加载的）
 #   cmake 之外执行: export LD_LIBRARY_PATH=/opt/MVS/lib/64:$LD_LIBRARY_PATH

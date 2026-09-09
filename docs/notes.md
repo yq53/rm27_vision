@@ -1018,7 +1018,29 @@ v2：框内**灯条精定位**（灯条端点 → 更准的四角点 → PnP 更
 - CMake 链接三件套：`target_include_directories`(头文件目录) / `target_link_directories`(库目录) / `target_link_libraries(MvCameraControl)`——库名去掉 `lib` 前缀与 `.so` 后缀；另加 SDK 存在性检查(FATAL_ERROR)。
 - 运行（无相机，需 `LD_LIBRARY_PATH=/opt/MVS/lib/64`）：Initialize / EnumDevices / Finalize 全成功，发现 0 台，退出码 0 → **把"环境/编译/链接问题"与"相机问题"彻底分开**：能跑到这行=环境 OK，现场接上相机同一份代码自然会枚举出 1 台。
 
-### 19.4 B 步计划
+### 19.4 B 步交付（hik_open，2026-09-10）
 
-- EnumDevices 后遍历清单，找与 yaml `serial_number` 匹配的设备 → `MV_CC_CreateHandle` + `MV_CC_OpenDevice` → `MV_CC_SetXXXValue`(曝光/增益)。
-- 无相机时重点：匹配不到要打印清晰错误并优雅退出（复用 printRet 的职责分离思想）。
+- 流程：枚举 → 按序列号点名（`serialOf` 按 nTLayerType 取字段）→ `MV_CC_CreateHandle`/`MV_CC_OpenDevice` → 关自动曝光 + 设 `ExposureTime`/`Gain` → 关闭句柄 → `Finalize`。
+- 用法：`hik_open [序列号]`；本机无相机：枚举 0 台 → 明确提示并退出 0（预期）；接上相机后同一份代码会走点名/打开分支。
+- **踩坑记录**：
+  - 序列号字段是 `unsigned char[]` 不是 `char[]` → 构造 `std::string` 需 `reinterpret_cast<const char*>`；
+  - 本版 SDK(5.0.2) **没有** `MV_GAIN_AUTO_MODE_OFF` 常量（只对 `ExposureAuto` 用 `MV_EXPOSURE_AUTO_MODE_OFF` 关自动，`Gain` 直接设 float）；
+  - `MV_CC_OpenDevice` 头文件里按 `__cplusplus` 给了默认参数版本 → C++ 里可单参调用；
+  - 参数名是字符串 `"ExposureTime"`/`"Gain"`（写错只会返回错误码，不报编译错）→ 返回值必须检查。
+- 下一步 C：`StartGrabbing` + 取帧 → 转 OpenCV BGR；D：并入 armor_tracker_node（yaml 选源）。
+
+### 19.5 概念问答沉淀（B 步：句柄 / 连接 / 参数树 / 生命周期）
+
+1. **handle（句柄）= 不透明指针，代表"这台相机的一个会话"**。SDK 内部为设备建好会话（设备信息/连接状态/参数缓存），只把"房卡"给你；之后所有操作都靠传 handle 让它知道"你说的是哪个会话"。
+2. **CreateHandle = 建档发卡**：`MV_CC_CreateHandle(IN OUT void** handle, IN const MV_CC_DEVICE_INFO*)`——为什么是 `void**`：C 没有引用，函数要"输出一个指针"就必须传指针的地址（`IN OUT` 即此意）。之后才能 OpenDevice。
+3. **OpenDevice = 建立连接并独占**（默认 `MV_ACCESS_Exclusive`，防止 MVS 客户端等抢占）。返回值仍是 int 错误码，失败必须检查并收尾（Open 失败也要 DestroyHandle+Finalize 再退出）。
+4. **SetXXXValue 家族与"参数树"设计**：相机参数不是写死的函数形参，而是内部一棵功能树（GenICam 特征节点，每个节点有名字+类型）。SDK 用字符串 `strKey` 按名找节点再设值：
+   - 类型决定 API：Enum 用 `SetEnumValue`（如 `ExposureAuto`，填 `MV_EXPOSURE_AUTO_MODE_OFF`=0）、连续值用 `SetFloatValue`（`ExposureTime` 单位 µs、`Gain` 单位 dB）、还有 SetBoolValue/SetIntValue/SetEnumValueByString；
+   - 名字写错**编译不报错、运行返回错误码** → 返回值必须查（printRet 的意义）；
+   - 单位/范围定义在相机 XML（MVS 客户端可查），现场调参靠 MVS 客户端；
+   - 顺序：**先关自动曝光再设固定值**，否则自动模式会覆盖手动设定。
+5. **成对生命周期（层次清晰）**：
+   - `Initialize`↔`Finalize`：SDK 全局（开张/打烊）
+   - `CreateHandle`↔`DestroyHandle`：会话资源（办卡/销卡）
+   - `OpenDevice`↔`CloseDevice`：连接占用（进门/退房）——**CloseDevice 只断连不销毁**，GigE 掉线后可 Close→Open 重连（handle 仍有效）
+   - 完整顺序：Initialize→Enum→CreateHandle→OpenDevice→(C 步 Start/StopGrabbing)→CloseDevice→DestroyHandle→Finalize；**错误路径也要逐层收尾**。
