@@ -18,6 +18,7 @@
 16. 模型域差实验（Plan A 负结果存档）
 17. 题3 ROS2 接入与可视化（P0/P1 + 真实相机验证完成）
 18. 复盘与修订记录（2026-09-09）
+19. Hik MVS SDK 接入（04_hik）
 
 ---
 
@@ -984,3 +985,40 @@ v2：框内**灯条精定位**（灯条端点 → 更准的四角点 → PnP 更
 - **复盘结论**：三题按题意全部完成并有可复现证据（题1 自训模型+量化、题2 v1 PnP+KF 平滑、题3 真实相机验证+可视化）。
 - **本次修订**：① README v2.0 重构（三题并列结构 + 状态总览 + FAQ + 修订记录）；② .gitignore 白名单让证据录屏入库（修复 README 死链）；③ 17.1 验收表与 17.6/17.7 同步；④ 补充 LICENSE。
 - **遗留（代码层，下一步处理）**：03 CMakeLists 注释仍写 `/armor/pose + /armor/twist`（实际单条 `/armor/state`）；`solveArmorPosition` 在 pnp_demo/03 重复可抽库；仿真器接入、棋盘标定、MOT/预测属加分项。
+
+## 19. Hik MVS SDK 接入（04_hik，2026-09-10 起）
+
+### 19.1 背景与路线（重来版）
+
+- **出题者原话**：他们实验室用海康相机；建议接 Hik SDK + 写 yaml 配参，现场"直接改一下相机序列号就行"，内参不要紧，重点看效果展示。
+- **复盘教训**：此前"04_camera 多后端抽象 + foxglove"范围失控、脱离掌控 → 已整体回退（revert c300e04），从最小实现重做，每步阅读+问答关口。
+- **路线（最小实现，边做边学）**：
+  - A ✅ hik_probe：链接 MVS SDK + 枚举相机（已完成，见 19.3）
+  - B ⏳ 按 yaml 序列号点名打开 + 设曝光（无相机时学报错路径）
+  - C 取帧 → 转 OpenCV BGR（真机前最后一公里）
+  - D 并入 armor_tracker_node：yaml 选择 hik 源（video_path 老用法不变）
+- **环境**：MVS 5.0.2 装于 /opt/MVS（dpkg；安装日志里 fonts/* 拷贝警告无害）。
+  关键路径：`include/MvCameraControl.h`、`lib/64/libMvCameraControl.so`(4.8.1.2)、官方示例 `Samples/64/C++/General/GrabImage/`。
+
+### 19.2 概念问答沉淀（A 步）
+
+1. **ret 返回码**：C 风格 SDK 没有异常机制，函数靠 int 返回值传"成功/失败+原因"。0=成功；非 0=错误码。海康错误码普遍带 `0x80000000` 高位，所以用十六进制看。
+   - 真相（MvErrorDefine.h）：`#define MV_OK 0x00000000`（**是宏不是 enum**）；`MV_E_HANDLE=0x80000000`、`MV_E_PARAMETER=0x80000004`、`MV_E_NODATA=0x80000007`…。
+   - 教训：MV_CC_* 返回值不可忽略，失败必须停下报错。
+2. **MV_CC_DEVICE_INFO_LIST 不是类**：C 的 struct（typedef），纯数据容器。真实定义（CameraParams.h:196）：`unsigned nDeviceNum`（几台）+ `MV_CC_DEVICE_INFO* pDeviceInfo[256]`（**指针数组**）。用指针数组而非结构体数组的原因：设备信息含 union、体积大，SDK 填地址省拷贝。
+3. **memset(s, c, n)**：把从 s 开始的连续 n 字节都填成 c。三参数=起始地址 / 字节值(0=清零) / 字节数(sizeof 整个结构)。用途：局部结构体在栈上是垃圾值，清零后 SDK 未填的字段不会读到未定义行为。现代等价写法：`MV_CC_DEVICE_INFO_LIST x{};`。
+4. **MV_CC_EnumDevices**（MvCameraControl.h:307）：`int MV_CC_EnumDevices(IN unsigned int nTLayerType, IN OUT MV_CC_DEVICE_INFO_LIST* pstDevList)`——只"点名清点"，不打开不出图。参数1=要哪类（`MV_GIGE_DEVICE|MV_USB_DEVICE` 位或）；参数2=IN OUT 容器（先清零、SDK 填结果）。
+5. **Initialize/Finalize 成对**：全局层的开/关（网络/USB 运行时）。单台相机的关闭是另一层次：`MV_CC_CloseDevice`（B 步见到）。原则：有开必有合。
+6. **printRet 只管打印的理由（职责分离）**：void"汇报员"只负责把 ret 翻译成文字；main 的 if"指挥官"决定是否退出。不同失败场合处置不同（Finalize 失败可容忍、取帧超时通常要跳过重试、Initialize 失败必须退出）→ 不能把"退出"写死在打印函数里。原则：**函数的副作用要与函数名匹配**；若要做"检查即退出"工具，单独命名（如 checkExit）复用。
+7. **nTLayerType = 设备传输层协议类型**（相机用什么线/协议连电脑）。取值（CameraParams.h）：`MV_UNKNOW_DEVICE=0x0`、`MV_GIGE_DEVICE=0x1`(网口)、`MV_USB_DEVICE=0x4`(USB3)、`MV_CAMERALINK_DEVICE=0x8`——跳号是位标记，可 `A|B` 组合。两处用途：EnumDevices 参数=输入过滤；枚举结果中每台 info 的该字段=输出，据此选 union 分支取序列号（GigE→`stGigEInfo.chSerialNumber`、USB3→`stUsb3VInfo.chSerialNumber`）。
+
+### 19.3 A 步交付与运行结果
+
+- 文件：`04_hik/CMakeLists.txt` + `04_hik/src/hik_probe.cpp`（提交 819d7d3）。
+- CMake 链接三件套：`target_include_directories`(头文件目录) / `target_link_directories`(库目录) / `target_link_libraries(MvCameraControl)`——库名去掉 `lib` 前缀与 `.so` 后缀；另加 SDK 存在性检查(FATAL_ERROR)。
+- 运行（无相机，需 `LD_LIBRARY_PATH=/opt/MVS/lib/64`）：Initialize / EnumDevices / Finalize 全成功，发现 0 台，退出码 0 → **把"环境/编译/链接问题"与"相机问题"彻底分开**：能跑到这行=环境 OK，现场接上相机同一份代码自然会枚举出 1 台。
+
+### 19.4 B 步计划
+
+- EnumDevices 后遍历清单，找与 yaml `serial_number` 匹配的设备 → `MV_CC_CreateHandle` + `MV_CC_OpenDevice` → `MV_CC_SetXXXValue`(曝光/增益)。
+- 无相机时重点：匹配不到要打印清晰错误并优雅退出（复用 printRet 的职责分离思想）。

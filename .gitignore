@@ -19,3 +19,6 @@ log/
 results/*
 # 例外：真实相机验证录屏是提交证据，需入库（README 引用此文件）
 !results/real_camera_2026-09-09.mkv
+
+# 海康 MVS SDK 运行日志（hik_probe 运行后自动生成）
+MvSdkLog/

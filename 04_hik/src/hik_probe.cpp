@@ -12,7 +12,7 @@
 
 namespace {
 
-// 小工具：把 SDK 返回码翻译成能看懂的报错（正式写法常查 MvErrorDefine.h）
+// 把 SDK 返回码翻译成能看懂的报错（正式写法常查 MvErrorDefine.h）
 void printRet(const char* what, int ret) {
     if (ret != MV_OK) {
         std::printf("[%s] 失败，错误码 = 0x%X（MV_OK=0 才是成功）\n", what, ret);
@@ -21,9 +21,7 @@ void printRet(const char* what, int ret) {
     }
 }
 
-// 从设备信息结构里取出序列号。
-// 概念③：同一个"设备信息"结构体里，GigE(网口) 相机和 USB3 相机放序列号的
-// 字段位置不一样（在 union 的不同分支里），所以要先看 nTLayerType 再取。
+// 从设备信息结构里取出序列号
 void printSerial(const MV_CC_DEVICE_INFO* dev) {
     if (dev == nullptr) {
         return;
@@ -40,8 +38,7 @@ void printSerial(const MV_CC_DEVICE_INFO* dev) {
 } // namespace
 
 int main() {
-    // 概念②：任何 SDK 都讲究"先初始化、用完释放"的成对操作。
-    // Initialize 让 SDK 内部准备好（网络/USB 运行时等）；程序结束时 Finalize 回收。
+    // SDK初始化
     std::printf("== 1) 初始化 SDK ==\n");
     int ret = MV_CC_Initialize();
     printRet("MV_CC_Initialize", ret);
@@ -49,10 +46,7 @@ int main() {
         return 1;
     }
 
-    // 概念②：枚举 = "问 SDK：现在能看到几台相机？把它们的清单给我"
-    // stDeviceList 是一个结构体：
-    //   nDeviceNum  —— 发现几台
-    //   pDeviceInfo —— 一个指针数组，每一项指向一台相机的信息(MV_CC_DEVICE_INFO)
+    // 输出检测到的所有相机
     std::printf("== 2) 枚举相机 ==\n");
     MV_CC_DEVICE_INFO_LIST device_list;
     std::memset(&device_list, 0, sizeof(device_list)); // 先清零，避免残留垃圾数据
