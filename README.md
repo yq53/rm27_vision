@@ -55,7 +55,7 @@ source install/setup.bash
 ## 题1：装甲板识别器（detector）
 
 方案：**YOLOv8n 神经网络（自训）**，CPU 上用 OpenCV DNN 推理（无需 onnxruntime / GPU）。
-训练数据为自己录制的比赛/演示视频抽帧标注（协议：`demo.avi` 只当测试集，**永不进训练**，详见 notes §18）。
+训练数据为自己录制的比赛/演示视频抽帧标注（协议：`demo.avi` 只当测试集，**永不进训练**，详见 notes §16）。
 
 - 模型：`models/armor_yolov8n.onnx`（单类别 `armour`，mAP50≈0.97；`_dark` 为暗化增强微调实验模型，负结果存档，勿用）
 - 库：`01_detector` → `rm_vision::ArmorDetector`，接口 `detect(frame) -> vector<Armor>`（阈值 0.35 / NMS 0.45，可调）
@@ -80,7 +80,7 @@ source install/setup.bash
 
 ### 已知局限（诚实声明）
 
-- 暗光下可能把一个装甲板的两个灯条误检成两个装甲（两框 IoU≈0，NMS 不合并；根因在模型层，见 notes §17）。
+- 暗光下可能把一个装甲板的两个灯条误检成两个装甲（两框 IoU≈0，NMS 不合并；根因在模型层，见 notes §15）。
 - 过小/模糊/镜头切换会漏检——单帧检测的正常局限，正是题2 tracker 用跨帧信息弥补的场景。
 
 ---
@@ -109,16 +109,16 @@ source install/setup.bash
 
 - `tracker_demo` 300 帧：相邻帧距离跳动 **raw 0.042 → EKF 0.020 m（抖减半）**；
   平均距离 raw 0.654 vs EKF 0.668 m（平滑不掉真值）。输出 `results/tracker_demo.avi`。
-- `pnp_demo` A 段合成闭环：干净数据距离/偏航解算误差≈0，重投影≈0 px（数字可复现，见 notes §13.6）。
+- `pnp_demo` A 段合成闭环：干净数据距离/偏航解算误差≈0，重投影≈0 px（数字可复现，见 notes §11.6）。
 - PnP 防伪解三层：IPPE 多解 + r₃.z>0 破镜像 + 重投影误差>10px 拒绝；物理闸门（z>0.2 且 dist<20m）兜底。
 
 ### v2 探索（已冻结为原型）
 
 框内**灯条精定位**（灯条端点 → 更准板角 → PnP 更准，顺带修题1 双灯条误检）：
 `light_bar_detector` 库 + `lightbar_demo` 已实现配对/合并逻辑，但 demo.avi 极端偏航下配对率仅 ~7%，
-继续投入需真机/定向数据支撑 → 冻结，设计决策与三级容错方案记录在 notes §17。
+继续投入需真机/定向数据支撑 → 冻结，设计决策与三级容错方案记录在 notes §15。
 
-### 已知局限（v1 简化，理由见 notes §16.3）
+### 已知局限（v1 简化，理由见 notes §14.3）
 
 - 单目标：每帧挑**面积最大**的板（≈最近）→ 两块板交替最大时会跳目标（多目标=MOT：数据关联+每目标一个滤波器，未做）。
 - 无装甲数字识别、无整车位姿估计、无目标预测（均属 v2 之后的加分项）。
@@ -174,7 +174,7 @@ ros2 run rqt_image_view rqt_image_view /armor/annotated
 
 - 内参为**演示级近似**：按分辨率 + 假定 HFOV≈72° 推导（`computeK`），未棋盘标定 → 距离量级可信、绝对精度需标定。
 - 可视化为 rqt 2D 标注（满足"可视化界面"要求）；未接仿真器（题面"仿真/真实相机"二选一，走通真实相机路线；河科仿真器为后续可选项）。
-- ROS2 踩坑（RMW/QoS/自定义消息/横屏）逐条记录在 notes §19.4。
+- ROS2 踩坑（RMW/QoS/自定义消息/横屏）逐条记录在 notes §17.4。
 
 ---
 
@@ -186,7 +186,7 @@ ros2 run rqt_image_view rqt_image_view /armor/annotated
 | rqt 打开后是渐变占位图 | 手动下拉常没真正订阅 → 直接带话题：`rqt_image_view rqt_image_view /armor/annotated` |
 | 手机流"Stream ends prematurely" | URL 少了 `/video` 后缀 |
 | 检测框在但 z<0 / 距离乱跳 | 手机竖屏（旋转元数据）→ 横屏解决 |
-| 距离绝对值和真实差一截 | 内参未标定（HFOV≈72° 近似）→ 只论量级；标定见 notes §10.11 |
+| 距离绝对值和真实差一截 | 内参未标定（HFOV≈72° 近似）→ 只论量级；标定见 notes §8.11 |
 
 ## 参考资料对照
 
@@ -201,4 +201,3 @@ ros2 run rqt_image_view rqt_image_view /armor/annotated
 |---|---|---|
 | v1.0 | 2026-09-08 | 三题初稿运行说明 + 证据截图 |
 | **v2.0** | 2026-09-09 | 复盘后重构：三题并列结构、状态总览表、补题2 运行/指标、FAQ、参考资料对照；修复录屏死链（.gitignore 白名单） |
-| v2.1 | 2026-09-09 | notes 移除自测清单类区块与"面试"指向性表述，回归知识记录+工作日志（见 notes §20.2）；README 措辞同步 |
