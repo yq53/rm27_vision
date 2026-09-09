@@ -21,6 +21,9 @@ find_package(rm_interfaces REQUIRED)
 # 复用题2 工程（内部引入 01_detector 的 armor_detector，并提供 armor_ekf）
 add_subdirectory(../02_tracker 02_tracker EXCLUDE_FROM_ALL)
 
+# 相机接入抽象（video/ip/hik + camera.yaml 可配；hik 需 USE_HIK_SDK=ON）
+add_subdirectory(../04_camera 04_camera EXCLUDE_FROM_ALL)
+
 # P0 教学示例（仅 detector）：视频 -> detector -> 发布标注图像话题
 add_executable(armor_video_node src/armor_video_node.cpp)
 ament_target_dependencies(armor_video_node rclcpp sensor_msgs std_msgs cv_bridge)
@@ -31,7 +34,7 @@ add_executable(armor_tracker_node src/armor_tracker_node.cpp)
 ament_target_dependencies(
   armor_tracker_node rclcpp sensor_msgs std_msgs cv_bridge rm_interfaces
 )
-target_link_libraries(armor_tracker_node armor_detector armor_ekf ${OpenCV_LIBS})
+target_link_libraries(armor_tracker_node armor_detector armor_ekf camera_source ${OpenCV_LIBS})
 
 install(TARGETS armor_video_node armor_tracker_node DESTINATION lib/${PROJECT_NAME})
 
