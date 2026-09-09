@@ -21,12 +21,12 @@ find_package(rm_interfaces REQUIRED)
 # 复用题2 工程（内部引入 01_detector 的 armor_detector，并提供 armor_ekf）
 add_subdirectory(../02_tracker 02_tracker EXCLUDE_FROM_ALL)
 
-# P0：视频 -> detector -> 发布标注图像话题
+# P0 教学示例（仅 detector）：视频 -> detector -> 发布标注图像话题
 add_executable(armor_video_node src/armor_video_node.cpp)
 ament_target_dependencies(armor_video_node rclcpp sensor_msgs std_msgs cv_bridge)
 target_link_libraries(armor_video_node armor_detector ${OpenCV_LIBS})
 
-# P1：detect -> PnP -> EKF -> 发布 /armor/pose + /armor/twist + 标注图
+# 主节点（完整链路）：detect -> PnP -> EKF -> 发布单条 /armor/state + 标注图 /armor/annotated
 add_executable(armor_tracker_node src/armor_tracker_node.cpp)
 ament_target_dependencies(
   armor_tracker_node rclcpp sensor_msgs std_msgs cv_bridge rm_interfaces
