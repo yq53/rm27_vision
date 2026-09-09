@@ -24,6 +24,7 @@ rm27_vision/
 ├── rm_interfaces/        # 自定义消息接口包（ArmorState.msg）
 ├── docs/
 │   ├── notes.md          # 学习笔记（原理问答 + 踩坑日志 + 工作记录）
+│   ├── foxglove/         # Foxglove 布局文件（3D+图像+曲线 一键导入）
 │   └── screenshots/      # 运行效果截图（题1 预览 + 题3 真实相机证据）
 └── results/              # 运行输出（生成物不入库，唯一例外=证据录屏 real_camera_*.mkv）
 ```
@@ -166,6 +167,23 @@ ros2 run rqt_image_view rqt_image_view /armor/annotated
 
 > 手机流地址**必须带 `/video`**（裸地址是网页，VideoCapture 打不开）；竖屏会产生 90° 旋转元数据 → PnP 镜像假解（z<0），**务必横屏**。
 > `armor_video_node` 用法相同，仅发布标注图（参数 `video_path/model_path/loop`，默认 loop=true）。
+
+### Foxglove 3D/图像/曲线可视化（P0b，2026-09-09）
+
+一键布局：`docs/foxglove/rm27_vision_layout.json`（Image=`/armor/annotated` + 3D + Plot=`/armor/state.distance`）。
+
+```bash
+# 终端1：主节点（video / ip / camera.yaml 均可）
+ros2 run rm_armor_visualization armor_tracker_node --ros-args -p video_path:=data/demo.avi
+# 终端2（可选，3D 位姿球）：发布 TF camera->armor + MarkerArray
+ros2 run rm_armor_visualization armor_marker_node
+# 终端3：ROS2 <-> Foxglove 桥
+ros2 run foxglove_bridge foxglove_bridge
+```
+
+- Foxglove Studio（或 app.foxglove.dev）→ `Open connection` → `ws://localhost:8765` → 导入上述布局；
+- 3D 面板固定坐标系为 `camera`；若要看板位姿球，需在 3D 面板侧栏把 TF / Marker 图层打开，并确保终端2 的 `armor_marker_node` 在跑；
+- 需要 `ros-humble-foxglove-bridge`（`sudo apt install ros-humble-foxglove-bridge`）。
 
 ### 真实相机验证证据（2026-09-09）
 
