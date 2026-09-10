@@ -1087,3 +1087,12 @@ v2：框内**灯条精定位**（灯条端点 → 更准的四角点 → PnP 更
 - **实测（本机，重构后重跑）**：T1 旧用法 / T2 camera_config+backend=video / T3 camera_config+backend=hik 无相机（`[hik_source] 未发现相机` + `[ERROR] hik 相机打开失败`，优雅退出）三路径通过。
 - **现场流程**：MVS 客户端查 SN → 填 `data/camera.yaml` 的 `serial_number` → `colcon build --cmake-args -DUSE_HIK_SDK=ON` → `export LD_LIBRARY_PATH=/opt/MVS/lib/64` → `ros2 run ... -p camera_config:=data/camera.yaml`。
 - **教训沉淀（用户原话修正）**：C 风格代码只该出现在"薄薄包住厂商 C SDK"的那一层；上层（节点/算法）用现代 C++（RAII/接口/多态），SDK 的 C 味道不传染上层。
+
+### 19.9 launch 一键启动（2026-09-10）
+
+- 新增 `03_visualization/launch/armor_tracker.launch.py`（CMake 加 `install(DIRECTORY launch ...)`），把"多终端 + 每次 export"收敛为一条命令。
+- **参数设计（A 方案：单一 source 自动映射）**：`source:=video|ip|hik` → launch 内部翻译成节点真实参数（video/ip→`video_path`；hik→`camera_config`），节点代码零改动；另有 `video_path` `ip_url` `camera_config` `model_path` `repo_root`(默认 `.`) `use_rqt`(默认 false) `rmw` `mvs_lib_dir`。
+- **repo_root**：把 `data/`、`models/` 等相对路径拼成绝对路径（`PathJoinSubstitution`），于是**任意目录都能启动**；默认 `.` 保持原行为；若直接传绝对路径也不会被拼坏（posixpath.join 规则）。
+- **环境变量自动化**：launch 内 `SetEnvironmentVariable` 设 `RMW_IMPLEMENTATION`；`source:=hik` 时额外把 `/opt/MVS/lib/64` 前置到 `LD_LIBRARY_PATH`——**仅进程级，不写 ~/.bashrc**。
+- **参数校验**：`source` 非三值之一 → 抛错并列出可选值；`source:=ip` 未给 `ip_url` → 抛错并给示例。
+- **实测（本机）**：A 默认 video 仓库根目录 ✅；B 从 `~` + `repo_root` 绝对路径 ✅；C `source:=ip` 缺 url → 明确报错 ✅；D `source:=hik` 无相机 → hik 报错链正常 ✅（D 能打印"未发现相机"即证明 launch 自动设置的 LD_LIBRARY_PATH 生效，否则 MVS 库都加载不了）。rqt 面板（`use_rqt:=true`）已在桌面会话实测通过：窗口正常弹出并显示 `/armor/annotated` 标注图（2026-09-10 用户验证 ✅）。

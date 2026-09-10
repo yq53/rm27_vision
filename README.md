@@ -139,7 +139,35 @@ rm_interfaces/
 └── msg/ArmorState.msg   # std_msgs/Header header; Point position; Vector3 velocity; float64 distance
 ```
 
-### 运行（完整链路）
+### 一键启动（推荐，launch）
+
+```bash
+cd <仓库根目录> && source install/setup.bash
+
+# 默认：视频源(data/demo.avi) + 主节点
+ros2 launch rm_armor_visualization armor_tracker.launch.py
+
+# 手机 IP Webcam（横屏；ip_url 必须带 /video）
+ros2 launch rm_armor_visualization armor_tracker.launch.py source:=ip ip_url:=http://<手机IP>:8080/video
+
+# 现场海康（改 data/camera.yaml 的 serial_number；需先用 USE_HIK_SDK=ON 构建）
+ros2 launch rm_armor_visualization armor_tracker.launch.py source:=hik
+
+# 附带 rqt 看图
+ros2 launch rm_armor_visualization armor_tracker.launch.py use_rqt:=true
+
+# 不在仓库根目录时：用 repo_root 指定绝对路径
+ros2 launch rm_armor_visualization armor_tracker.launch.py repo_root:=$HOME/my_project/ws_exam/rm27_vision
+```
+
+- `source` 是唯一入口参数（video/ip/hik），launch 自动映射成节点的 `video_path` / `camera_config`；
+- launch 会自动设置 `RMW_IMPLEMENTATION`（及 hik 模式的 `LD_LIBRARY_PATH`），**仅对本次启动的进程生效，不写入 ~/.bashrc**；
+- 其余参数：`video_path` `ip_url` `camera_config` `model_path` `repo_root`(默认 `.`) `use_rqt` `rmw` `mvs_lib_dir`。
+- 已实测（2026-09-10）：默认 video / 异地启动+`repo_root` / `source:=ip` 缺参报错 / `source:=hik` 无相机报错 / `use_rqt:=true` 弹窗看图 ✅。
+
+### 运行（完整链路·手动分终端）
+
+
 
 ```bash
 # 构建

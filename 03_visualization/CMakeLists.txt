@@ -54,4 +54,7 @@ endif()
 
 install(TARGETS armor_video_node armor_tracker_node DESTINATION lib/${PROJECT_NAME})
 
+# 安装 launch 文件（ros2 launch rm_armor_visualization armor_tracker.launch.py）
+install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
+
 ament_package()
