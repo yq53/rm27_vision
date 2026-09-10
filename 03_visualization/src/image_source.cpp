@@ -30,10 +30,12 @@ public:
         cap_.open(cfg.video_path);
     }
 
+    // 判断VideoCapture是否启动
     bool isOpened() const override {
         return cap_.isOpened();
     }
 
+    // VideoCapture读取帧
     bool read(cv::Mat& out) override {
         if (cap_.read(out)) {
             return true;
@@ -45,6 +47,7 @@ public:
         return false;
     }
 
+    // 获取源视频帧率
     double fpsHint() const override {
         const double fps = cap_.get(cv::CAP_PROP_FPS);
         return fps > 0.0 ? fps : 30.0;
@@ -59,12 +62,14 @@ private:
 // ---------- hik 源：海康 MVS SDK（仅 USE_HIK_SDK=ON 时编译） ----------
 namespace {
 
+// 错误码翻译
 void printRet(const char* what, int ret) {
     if (ret != MV_OK) {
         std::printf("[hik_source][%s] 失败，错误码 = 0x%X\n", what, ret);
     }
 }
 
+// 获取序列号
 std::string serialOf(const MV_CC_DEVICE_INFO* dev) {
     if (dev == nullptr) {
         return "";
@@ -88,10 +93,12 @@ class HikSource: public ImageSource {
 public:
     // 构造即打开：失败会打印原因并抛异常（由工厂/节点捕获）
     explicit HikSource(const SourceConfig& cfg) {
+        // 初始化机械视觉相机控制系统
         if (MV_CC_Initialize() != MV_OK) {
             throw std::runtime_error("hik: MV_CC_Initialize 失败");
         }
 
+        // 获取设备列表
         MV_CC_DEVICE_INFO_LIST list;
         std::memset(&list, 0, sizeof(list));
         if (MV_CC_EnumDevices(MV_GIGE_DEVICE | MV_USB_DEVICE, &list) != MV_OK
@@ -101,6 +108,7 @@ public:
             throw std::runtime_error("hik: 未发现相机(serial=" + cfg.serial_number + ")");
         }
 
+        // 遍历搜索目标设备序列号
         int idx = -1;
         for (unsigned int i = 0; i < list.nDeviceNum; ++i) {
             const std::string sn = serialOf(list.pDeviceInfo[i]);
@@ -116,6 +124,7 @@ public:
             throw std::runtime_error("hik: 未找到序列号 " + cfg.serial_number);
         }
 
+        // 创建handle并链接设备
         if (MV_CC_CreateHandle(&handle_, list.pDeviceInfo[idx]) != MV_OK) {
             handle_ = nullptr;
             MV_CC_Finalize();
@@ -135,6 +144,7 @@ public:
         ret = MV_CC_SetFloatValue(handle_, "Gain", cfg.gain);
         printRet("Gain", ret);
 
+        // 捕获相机流，推入buffer
         if (MV_CC_StartGrabbing(handle_) != MV_OK) {
             MV_CC_CloseDevice(handle_);
             MV_CC_DestroyHandle(handle_);
@@ -151,8 +161,9 @@ public:
         close();
     }
 
+    // 设备是否开启
     bool isOpened() const override {
-        return handle_ != nullptr && grabbing_;
+        return (handle_ != nullptr) && grabbing_;
     }
 
     bool read(cv::Mat& out) override {
@@ -161,11 +172,15 @@ public:
         }
         MV_FRAME_OUT frame_out;
         std::memset(&frame_out, 0, sizeof(frame_out));
+
+        // 从buffer中取帧，最多等待1000ms(1s)
         const int ret = MV_CC_GetImageBuffer(handle_, &frame_out, 1000);
         if (ret != MV_OK) {
             printRet("GetImageBuffer", ret);
             return false;
         }
+
+        // 检测图像像素信息
         const auto& info = frame_out.stFrameInfo;
         bool ok = false;
         if (info.enPixelType == PixelType_Gvsp_BGR8_Packed) {
@@ -211,6 +226,7 @@ private:
 
 } // namespace
 
+// 加载yaml文件
 SourceConfig loadSourceConfig(const std::string& yaml_path) {
 #ifdef RM_USE_HIK_SDK
     SourceConfig cfg;
@@ -241,6 +257,7 @@ SourceConfig loadSourceConfig(const std::string& yaml_path) {
 #endif
 }
 
+// 
 std::unique_ptr<ImageSource> createImageSource(const SourceConfig& cfg) {
     if (cfg.backend == "hik") {
 #ifdef RM_USE_HIK_SDK

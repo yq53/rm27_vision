@@ -133,22 +133,29 @@ public:
         const std::string model_path =
             declare_parameter<std::string>("model_path", "models/armor_yolov8n.onnx");
 
+        // detector初始化
         detector_ = std::make_unique<ArmorDetector>(model_path);
         detector_->setConfidenceThreshold(0.35f);
         detector_->setNmsThreshold(0.45f);
 
+        // SourceConfig初始化
         rm_vision::SourceConfig cfg;
         cfg.video_path = video_path; // 无 yaml 时沿用 video_path 参数
         if (!camera_config.empty()) {
             cfg = rm_vision::loadSourceConfig(camera_config);
         }
         source_ = rm_vision::createImageSource(cfg); // hik 打开失败会抛异常
+        // !source_ 是防御性检查：当前工厂契约是"返回非空指针或抛异常"，此半句正常不会成立；
+        // 保留它可在将来工厂改为 return nullptr 时拦住空指针，避免下一句解引用崩溃。
         if (!source_ || !source_->isOpened()) {
             throw std::runtime_error(
                 "cannot open camera source: " + (camera_config.empty() ? video_path : camera_config)
             );
         }
 
+        // fpsHint() 接口只承诺"给出节拍参考"，并未承诺一定 > 0（各实现自己保证）；
+        // 这里兜底是为了防止 1/fps = inf 让定时器周期变成无穷大、节点静默不再处理帧
+        //（旧实现用 CAP_PROP_FPS，对流/相机常返回 0，历史上确实会触发）。
         double fps = source_->fpsHint();
         if (fps <= 0) {
             fps = 30.0;
