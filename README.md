@@ -6,6 +6,9 @@
 
 - 代码：C++17 + OpenCV（题1 / 题2 为普通 CMake，题3 为 ROS2 Humble ament / colcon）
 - 素材：`data/demo.avi`（687 帧，自录，**只作测试集、永不进训练**）；模型全部随仓库提供
+- 检测器：**默认的 bbox 模型是本仓库自己训练的（训练量小、效果一般）**；
+  **推荐的四关键点模型来自深圳大学 RobotPilots 战队 26 赛季开源**（题面并未要求，是我为提高效果主动引入的）——
+  两者对比见「题1」，来源链接见文末「参考仓库与教程」
 - 评测：`eval_demo` 统一口径离线评测（逐帧 CSV + 汇总），本 README 里的指标数字都可复现
 
 ## 快速开始（clone → 构建 → 看题3 的效果）
@@ -37,7 +40,7 @@ ros2 launch rm_armor_visualization armor_tracker.launch.py use_rqt:=true print_s
 
 | 题 | 题面要求 | 本仓库交付 | 状态 | 证据 |
 |---|---|---|---|---|
-| 题1 detector | 识别装甲板；传统视觉或神经网络方案均可，不要求高鲁棒性 | `01_detector/`：自训 YOLOv8n bbox 检测器（默认）+ 深大四关键点检测器（可选）两种实现，同一接口 | ✅ | 687 帧检出 **72.49%（bbox）/ 90.25%（关键点）**；`docs/screenshots/` |
+| 题1 detector | 识别装甲板；传统视觉或神经网络方案均可，不要求高鲁棒性 | `01_detector/`：自训 YOLOv8n bbox 检测器（默认，效果一般）+ 深大 26 开源的**四关键点检测器（推荐）**，两种实现同一接口 | ✅ | 687 帧检出 **72.49%（bbox）/ 90.25%（关键点）**；`docs/screenshots/` |
 | 题2 tracker | 单板跟踪或整车估计；PnP+EKF、ESEKF、MCSKF、因子图等后端不限 | `02_tracker/`：PnP（IPPE 多解 + 破镜像 + 双重闸门）+ 常速卡尔曼；另附离线评测基础设施 | ✅ | 687 帧 A/B 表（本文件）+ `compare_eval.py` 一键复算 |
 | 题3 接入与可视化 | 做到可接入**仿真、真实相机**验证算法，并有可视化界面展示（OpenGL/QT/GTK、web、foxglove、rerun 等） | `03_visualization/` + `rm_interfaces/`：图像源抽象（视频 / 网络流 / 海康工业相机）+ 完整链路 ROS2 节点 + 自定义状态话题 + rqt 2D 标注 | ✅（走通**真实相机**路线，未接仿真器） | `results/real_camera_2026-09-09.mkv`、`docs/screenshots/phone_rqt.png` |
 | 导航方向 | 运动控制 / A-B / 路径规划 共 4 小题 | 未做（题面注明视觉与导航方向不强求全部完成；本仓库聚焦视觉方向） | — | — |
@@ -57,8 +60,11 @@ POSE_MODEL=models/third_party/Infantry-v8n/Infantry-v8n-fp16-20260726-D1.8w-B16.
 
 ### A. demo 视频（`data/demo.avi`，仓库自带）
 
+> **推荐先跑 ②**：四关键点模型来自深圳大学 RobotPilots 战队 26 赛季开源，效果明显更好；
+> ① 用的是本仓库自训的 bbox 模型（训练量小、效果一般），留作基线对照。
+
 ```bash
-# ① 视频 + bbox 检测器（默认）
+# ① 视频 + bbox 检测器（默认；本仓库自训模型，效果一般）
 ros2 launch rm_armor_visualization armor_tracker.launch.py use_rqt:=true print_state:=true
 
 # ② 视频 + 四关键点检测器
@@ -250,12 +256,20 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 
 两个检测器实现同一个概念接口（`detect(frame) -> 一组带 rect 的目标`），可按需切换、互不影响：
 
-- `rm_vision::ArmorDetector`：轴对齐 bbox，角点由框四角近似（**默认**）
-- `rm_vision::ArmorPoseDetector`：4 个灯条端点，可直接用于 PnP，无需框角近似（**可选**）
+- `rm_vision::ArmorDetector`：轴对齐 bbox，角点由框四角近似（默认实现，**效果一般**，见下）
+- `rm_vision::ArmorPoseDetector`：4 个灯条端点，可直接用于 PnP，无需框角近似（可选实现，**推荐**）
 
-### 方案 A：自训 YOLOv8n bbox 检测器（默认）
+> **该看哪一个？**
+> **方案 A（bbox）的模型是本仓库自己训练的**——训练集只有我自己录的少量素材、标注量小，
+> 所以效果明显偏差（687 帧检出 72.49%、重投影 4.11 px）；
+> **方案 B（四关键点）直接使用深圳大学 RobotPilots 战队 26 赛季开源的模型**，效果显著更好
+> （90.25% / 1.19 px）。**想看这个项目最好的效果，请优先用方案 B**；
+> 方案 A 保留的价值是"从零自训一遍"的完整过程记录，以及一个可对照的基线。
 
-CPU 上用 OpenCV DNN 推理（**无需 onnxruntime、无需 GPU**）。训练数据为自己录制的比赛/演示视频抽帧标注，
+### 方案 A：自训 YOLOv8n bbox 检测器（默认，效果一般）
+
+**这个模型是本仓库自己训练的**：训练数据为自己录制的比赛/演示视频抽帧标注（量小），
+CPU 上用 OpenCV DNN 推理（**无需 onnxruntime、无需 GPU**）。
 协议：`data/demo.avi` 只当测试集、**永不进训练**（域差实验与协议见 notes §16）。
 
 | 模型 | 说明 |
@@ -320,10 +334,11 @@ CPU 上用 OpenCV DNN 推理（**无需 onnxruntime、无需 GPU**）。训练�
 
 模型直接回归 4 个**灯条端点**，绕过"bbox 四角近似"这一步，从根上提高 PnP 的角点质量。
 
-- **来源与许可**：深大 RobotPilots 开源的 `Infantry-v8n`（YOLOv8n-Pose 重设计头）。
-  权重**随仓库提交**在 `models/third_party/Infantry-v8n/`；上游标称 MIT，但其 **ONNX 元数据标注
-  AGPL-3.0（Ultralytics）** → 本仓库**不对该权重做 MIT 声明**。来源、文件名、校验和与模型元信息
-  见该目录的 `SOURCE.md`，许可边界见下文「许可说明」。
+- **模型来源**：**深圳大学 RobotPilots 战队 26 赛季开源**「RM2026-视觉模型统一部署库与识别模型开源」
+  （社区帖链接见文末「参考仓库与教程」第 1 条）里的 `Infantry-v8n`（YOLOv8n-Pose 重设计头）。
+- **许可**：权重**随仓库提交**在 `models/third_party/Infantry-v8n/`；上游标称 MIT，但其 **ONNX 元数据标注
+  AGPL-3.0（Ultralytics）** → 本仓库**不对该权重做 MIT 声明**。文件名、校验和与模型元信息见该目录
+  `SOURCE.md`，许可边界见下文「许可说明」。
 - **输入几何**：`480×640`（4:3，与相机/素材同比例 → letterbox 退化为纯缩放，无灰边）；
   对比自训 bbox 模型的 `640×640`（4:3 素材需上下各补 80 行灰边，画布 25% 是废像素）。
 - **输出布局**（实测确认，`21 × 6300`）：`row4..12` = 9 个类别分数，`row13..20` = 4 个关键点 (x,y)，
@@ -750,18 +765,25 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | 距离绝对值和真实差一截 | 内参未标定（HFOV≈72° 近似）→ 只论量级；为什么要标定见 notes §8.11（标定本身尚未做） |
 | 从别的目录启动后节点立刻退出 | 相对路径失效 → 加 `repo_root:=/绝对/路径/rm27_vision` |
 
-## 参考资料对照
+## 参考仓库与教程
 
-考核题面给出的是完整的自瞄能力链（识别模型 → 部署框架 → 仿真 → 整车系统）。本工程学习时对照阅读了：
+本工程站在这些开源项目与教程的肩膀上（考核题面所推荐的资料也在其中）。**按"我们用它做了什么"排序**：
 
-- **同济 SuperPower `sp_vision_25`**：灯条端点 3D 建模、板尺寸 135×125 / 230×127、灯条长度 56mm 的出处
-  （源码在工作区本地 `reference/`，**未随本仓库发布**）——本工程 `barEndObjectPoints` 的物体模型直接来自这里；
-- **深大 RobotPilots 26 赛季视觉模型**：四关键点（Pose）思路与模型——本工程方案 B 的模型来源（权重见
-  `models/third_party/Infantry-v8n/`）；
-- **河科 Actor&Thinker 视觉仿真器**：内参精确已知的仿真思路（作为"仿真接入"的后续可选项）；
-- 上科大十等星 26 赛季自瞄教程：概念与工程结构的对照。
+| # | 开源项目 / 教程 | 链接 | 我们用到了什么 |
+|---|---|---|---|
+| 1 | **深圳大学 RobotPilots｜RM2026 视觉模型统一部署库与识别模型开源** | https://bbs.robomaster.com/article/1942761 | **直接使用了其中的四关键点模型 `Infantry-v8n`**（题1 方案 B / `detector:=pose`）：权重随仓库提交在 `models/third_party/Infantry-v8n/`，来源与 sha256 见该目录 `SOURCE.md`，关键点语义按 notes 实测确认 |
+| 2 | 同济大学 SuperPower｜`sp_vision_25` 视觉框架 | https://github.com/TongjiSuperPower/sp_vision_25 | 灯条端点 3D 建模思路、装甲板尺寸 135×125 / 230×127、灯条长度 56mm 的出处 → 本工程 `barEndObjectPoints`（源码曾在工作区本地 `reference/` 对照阅读，**未随本仓库发布**） |
+| 3 | 河北科技大学 Actor&Thinker｜RM2026 视觉算法仿真器 | https://bbs.robomaster.com/article/1887395 | "仿真里内参精确已知"的思路（本工程未接入，列为后续可选项） |
+| 4 | 河北科技大学 Actor&Thinker｜RM2026 YOLO26 端到端装甲板 ONNX 模型 | https://bbs.robomaster.com/article/1886180 | 端到端 / keypoint 类识别模型的对照阅读 |
+| 5 | 武汉科技大学崇实战队｜RM2026 算法综合开源（视觉 / 导航 / 决策） | https://bbs.robomaster.com/article/1936030 | 自瞄链路与工程结构的整体对照 |
+| 6 | 深圳大学 RobotPilots｜RM2024 识别模型 | https://bbs.robomaster.com/article/54091 | 早期装甲板识别模型的对照 |
+| 7 | 上科大十等星｜26 赛季自瞄教程 | https://fcn47qghdcqf.feishu.cn/wiki/Hcw1wxTMZicx0xkinuQcKHetn5d | 概念与工程结构的入门对照（题面推荐资料） |
+| 8 | Ultralytics YOLOv8 | https://github.com/ultralytics/ultralytics | 自训 bbox 模型的训练链；其 **AGPL-3.0** 同样适用于本仓库里的权重（见「许可说明」） |
+| 9 | ONNX Runtime | https://github.com/microsoft/onnxruntime | 四关键点模型的推理后端（可选构建项） |
+| 10 | OpenCV · ROS2 Humble | https://opencv.org · https://docs.ros.org/en/humble | 基础依赖 |
 
-踩坑、设计决策、两条 v2 负结果的完整记录都在 `docs/notes.md`。
+> 社区帖链接需要登录 RoboMaster 社区才能查看；若失效可按标题在社区内搜索。
+> 我们对这些项目的学习、对照与踩坑过程记录在 `docs/notes.md`。
 
 ## 许可说明
 
@@ -791,3 +813,4 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | **v3.3** | 2026-09-11 | 体验优化：新增「快速开始（clone → 跑起来）」；新增 `scripts/demo.sh` 一键启动脚本（手工版照旧保留）；新增可选节点 `armor_state_printer` + launch 参数 `print_state`（单终端即可看到状态数字）；主节点在画面上叠加当前检测器模式（`detector: bbox/pose`，便于截图自证）；把两份评测汇总加入 `.gitignore` 白名单随仓库提交；每处验证步骤补「预期效果」（含常见异常判据）；`docs/notes.md` 同步重编目录（两级索引 + 状态标签）并新增 §22「与 README 的双向对照」 |
 | **v3.4** | 2026-09-11 | 职责收窄：`scripts/demo.sh`（会启动程序）改为 **`scripts/setup.sh`（只配置环境 + 构建，不启动任何程序）**，启动入口统一收敛到 `ros2 launch`；`setup.sh` 会自动探测 ONNX Runtime / MVS SDK 并把 bbox 与 pose 两条通路都编好，收尾打印两条素材 demo.avi 的启动命令；更换带 `detector: pose` 标签的 rqt 截图 |
 | **v3.5** | 2026-09-11 | 突出核心：顶部「快速开始」只引导到题3（clone → `scripts/setup.sh` → `ros2 launch`）；原「30 秒快速验证」改为 **「快速验证（题3：两种素材 × 两种检测器）」**，只保留题3 的 4 条命令（demo 视频 / 海康相机流 × bbox / pose）与各自预期效果，题1、题2 的验证命令回归各自小节 |
+| **v3.6** | 2026-09-11 | 如实标注模型强弱：说明 **bbox 模型是本仓库自训（训练量小、效果一般）**，**推荐使用深大 26 开源的 pose 模型**并标注其来源；新增文末 **「参考仓库与教程」**（10 条带链接，首位即深大 RobotPilots 的模型开源帖） |
