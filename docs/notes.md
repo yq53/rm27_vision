@@ -117,7 +117,8 @@
 | 检测框在但 z<0 / 距离乱跳 | 手机竖屏产生 90° 旋转元数据 → 镜像假解，务必横屏 | `log.md §17.4` |
 | 海康程序报找不到 `libMvCameraControl.so` | 一般**不需要**设 `LD_LIBRARY_PATH`（CMake 已写入 RUNPATH）；只有换环境才要 | `log.md §19.3` |
 | 设了 `RM_CORNER_DEBUG=0` 也落盘调试图 | 源码判断是 `getenv() != nullptr`，**传任意值都触发** | 本轮实测（README） |
-| `scripts/setup.sh` 探不到 ONNX Runtime | 用 `ORT_DIR=/你的/onnxruntime bash scripts/setup.sh` 指定 | `README.md`「配置环境与构建」 |
+| `scripts/setup.sh` 探不到 ONNX Runtime | 用 `ORT_DIR=/你的/onnxruntime bash scripts/setup.sh` 指定 | `README.md`「第二步：环境配置」 |
+| 不确定这台机器缺什么依赖 | 跑 `bash scripts/check_env.sh`：逐项自检（系统/工具链/ROS2 与所需包/colcon/OpenCV/可选 ORT 与 MVS/素材），缺失项直接给安装命令，退出码 0=齐全、1=有缺失 | `README.md`「第二步：环境配置」 |
 
 ## 7. 负结果与已知局限
 
@@ -156,7 +157,8 @@
 
 ## 9. 文档地图与交叉验证
 
-- 想**跑起来看效果** → `README.md`（顶部「快速开始」与「快速验证（题3）」）
+- 想**准备环境** → `bash scripts/check_env.sh`（依赖自检，缺什么给什么安装命令）+ `bash scripts/setup.sh`（配置环境并构建）
+- 想**跑起来看效果** → `README.md`（「第三步：快速验证（题3）」）
 - 想**核对数字** → `README.md`「687 帧实测」+ `results/eval_*_summary.txt`（已入库）
 - 想**快速建立整体认识** → 本文件
 - 想**溯源推导 / 看踩坑过程 / 看负结果原始记录** → [`log.md`](log.md)（23 章，章节号稳定）

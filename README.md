@@ -11,44 +11,63 @@
   两者对比见「题1」，来源链接见文末「参考仓库与教程」
 - 评测：`eval_demo` 统一口径离线评测（逐帧 CSV + 汇总），本 README 里的指标数字都可复现
 
-## 快速开始（clone → 构建 → 看题3 的效果）
-
-题3「接入真实相机 + 可视化」是本项目的**核心效果**：图像源 → 检测 → PnP → EKF → 可视化；
-题1、题2 是这条链路上的两个环节，各自的用法与验证放在自己的小节里（「题1」/「题2」），这里不重复。
+## 第一步：clone
 
 ```bash
-# 1) 克隆（地址换成你自己的仓库）
-git clone https://github.com/your-name/rm27_vision.git
+git clone https://github.com/your-name/rm27_vision.git    # ← 换成你自己的仓库地址
 cd rm27_vision
-
-# 2) 配置环境 + 构建（自动探测 ONNX Runtime / MVS SDK，并把 bbox 与 pose 两条通路都编好）
-bash scripts/setup.sh
-
-# 3) 起完整链路：视频源 data/demo.avi + bbox 检测器 + rqt 画面 + 终端状态数字
-source install/setup.bash
-ros2 launch rm_armor_visualization armor_tracker.launch.py use_rqt:=true print_state:=true
 ```
 
-- **前置**：Ubuntu 22.04 · ROS2 Humble · OpenCV 4.x · C++17（详见「环境与依赖」）。
-- **仓库自带**测试素材 + 两个检测器模型，**不需要额外下载任何东西**；只有两个可选项要自己装：
-  ONNX Runtime（四关键点检测器，`setup.sh` 会自动探测并启用）与海康 MVS SDK（真机相机 `source:=hik`）。
-- **脚本与启动的分工**：`scripts/setup.sh` 只负责"环境 + 构建"，**不启动任何程序**；启动统一走 `ros2 launch`。
-- 只想验证题1 / 题2（纯 C++、不需要 ROS）：命令见「题1 → 快速验证」与「题2 → 快速验证」。
-- 两种检测器 × 两种素材的 4 条命令与预期效果，见下面「快速验证（题3）」。
+- **仓库自带一切**：测试素材 `data/demo.avi`（687 帧）+ 两个检测器模型（含深大 26 开源的 pose 模型），
+  **不需要额外下载任何东西**。
+- clone 完先别急着构建——第二步的自检会告诉你这台机器还缺什么。
+- 只想先看代码结构：跳到「目录结构」与「文件清单」；想先看效果：按要求做完第二步，然后跑第三步。
 
-## 考核要求对照
+## 第二步：环境配置
 
-| 题 | 题面要求 | 本仓库交付 | 状态 | 证据 |
-|---|---|---|---|---|
-| 题1 detector | 识别装甲板；传统视觉或神经网络方案均可，不要求高鲁棒性 | `01_detector/`：自训 YOLOv8n bbox 检测器（默认，效果一般）+ 深大 26 开源的**四关键点检测器（推荐）**，两种实现同一接口 | ✅ | 687 帧检出 **72.49%（bbox）/ 90.25%（关键点）**；`docs/screenshots/` |
-| 题2 tracker | 单板跟踪或整车估计；PnP+EKF、ESEKF、MCSKF、因子图等后端不限 | `02_tracker/`：PnP（IPPE 多解 + 破镜像 + 双重闸门）+ 常速卡尔曼；另附离线评测基础设施 | ✅ | 687 帧 A/B 表（本文件）+ `compare_eval.py` 一键复算 |
-| 题3 接入与可视化 | 做到可接入**仿真、真实相机**验证算法，并有可视化界面展示（OpenGL/QT/GTK、web、foxglove、rerun 等） | `03_visualization/` + `rm_interfaces/`：图像源抽象（视频 / 网络流 / 海康工业相机）+ 完整链路 ROS2 节点 + 自定义状态话题 + rqt 2D 标注 | ✅（走通**真实相机**路线，未接仿真器） | `results/real_camera_2026-09-09.mkv`、`docs/screenshots/phone_rqt.png` |
-| 导航方向 | 运动控制 / A-B / 路径规划 共 4 小题 | 未做（题面注明视觉与导航方向不强求全部完成；本仓库聚焦视觉方向） | — | — |
+### 2.1 自检（先跑这一条，它会告诉你缺什么、怎么装）
 
-> 三题通过同一套「2D 点 → PnP → EKF」主链路串起来：题1 决定 2D 点从哪来，题2 决定怎么解与怎么平滑，
-> 题3 决定数据从哪来、结果给谁看。这也是本工程的组织方式——**一题一目录，但共享同一份核心库**。
+```bash
+bash scripts/check_env.sh
+```
 
-## 快速验证（题3：两种素材 × 两种检测器）
+逐项检查：系统版本、编译工具链（g++/clang、cmake、make、pkg-config）、**ROS2 Humble 与所需软件包**
+（rclcpp / sensor_msgs / std_msgs / geometry_msgs / cv_bridge / rqt_image_view）、colcon、OpenCV，
+以及两个**可选**依赖（ONNX Runtime、海康 MVS SDK）与仓库自带素材是否完整。
+缺失项会直接打印可复制的安装命令。**退出码 0 = 必需项齐全，1 = 有必需项缺失。**
+
+自检给出的常见缺失与装法（汇总在此备用）：
+
+| 缺什么 | 怎么装 |
+|---|---|
+| ROS2 Humble | 按官网装：https://docs.ros.org/en/humble/Installation/Ubuntu-Install-Debs.html |
+| ROS2 软件包 | `sudo apt install ros-humble-cv-bridge ros-humble-rqt-image-view` |
+| colcon | `sudo apt install python3-colcon-common-extensions` |
+| OpenCV 开发包 | `sudo apt install libopencv-dev` |
+| 编译工具链 | `sudo apt install build-essential cmake pkg-config` |
+| **可选**：ONNX Runtime（只有 `detector:=pose` 需要） | 到 https://github.com/microsoft/onnxruntime/releases 下载 `onnxruntime-linux-x64-*.tgz`，**解压即可、无需安装** |
+| **可选**：海康 MVS SDK（只有 `source:=hik` 需要） | 装海康 MVS 客户端（自带 SDK）；另需 `sudo apt install libyaml-cpp-dev` |
+| ROS 日志目录不可写（`~/.ros` 只读） | `export ROS_LOG_DIR=$PWD/.roslog` |
+
+> 只想跑题1 / 题2（纯 C++，不需要 ROS）：自检里 ROS2 那一段的缺失不影响你，装好 OpenCV + 工具链即可。
+
+### 2.2 构建
+
+```bash
+bash scripts/setup.sh
+```
+
+`setup.sh` 会自己再探一次可选依赖并做对应开关，最后打印开关状态与下一步命令：
+
+| 命令 | 作用 |
+|---|---|
+| `bash scripts/setup.sh` | 环境 + 构建（探测到 ONNX Runtime 就自动把 `detector:=pose` 一起编进去） |
+| `ORT_DIR=/你的/onnxruntime bash scripts/setup.sh` | 手工指定 ONNX Runtime 位置 |
+| `bash scripts/setup.sh --clean` | 先删 `build/ install/ log/` 再全量重建 |
+
+> 不想用脚本也行：手工命令见「构建」一节，效果完全一样。**脚本只做"环境 + 构建"，不启动任何程序。**
+
+## 第三步：快速验证（题3：两种素材 × 两种检测器）
 
 下面 4 条命令覆盖 **demo 视频 / 海康相机流 × bbox / pose**，都在**仓库根目录**执行。
 前置：先跑一次 `bash scripts/setup.sh`，然后
@@ -111,6 +130,18 @@ ros2 launch rm_armor_visualization armor_tracker.launch.py source:=hik \
 > 上面 4 条中，A 的两条已于 2026-09-11 在本仓库实测通过；B 的两条因本机没有相机，
 > 只验证到"枚举不到设备并明确报错"这一步。
 
+## 考核要求对照
+
+| 题 | 题面要求 | 本仓库交付 | 状态 | 证据 |
+|---|---|---|---|---|
+| 题1 detector | 识别装甲板；传统视觉或神经网络方案均可，不要求高鲁棒性 | `01_detector/`：自训 YOLOv8n bbox 检测器（默认，效果一般）+ 深大 26 开源的**四关键点检测器（推荐）**，两种实现同一接口 | ✅ | 687 帧检出 **72.49%（bbox）/ 90.25%（关键点）**；`docs/screenshots/` |
+| 题2 tracker | 单板跟踪或整车估计；PnP+EKF、ESEKF、MCSKF、因子图等后端不限 | `02_tracker/`：PnP（IPPE 多解 + 破镜像 + 双重闸门）+ 常速卡尔曼；另附离线评测基础设施 | ✅ | 687 帧 A/B 表（本文件）+ `compare_eval.py` 一键复算 |
+| 题3 接入与可视化 | 做到可接入**仿真、真实相机**验证算法，并有可视化界面展示（OpenGL/QT/GTK、web、foxglove、rerun 等） | `03_visualization/` + `rm_interfaces/`：图像源抽象（视频 / 网络流 / 海康工业相机）+ 完整链路 ROS2 节点 + 自定义状态话题 + rqt 2D 标注 | ✅（走通**真实相机**路线，未接仿真器） | `results/real_camera_2026-09-09.mkv`、`docs/screenshots/phone_rqt.png` |
+| 导航方向 | 运动控制 / A-B / 路径规划 共 4 小题 | 未做（题面注明视觉与导航方向不强求全部完成；本仓库聚焦视觉方向） | — | — |
+
+> 三题通过同一套「2D 点 → PnP → EKF」主链路串起来：题1 决定 2D 点从哪来，题2 决定怎么解与怎么平滑，
+> 题3 决定数据从哪来、结果给谁看。这也是本工程的组织方式——**一题一目录，但共享同一份核心库**。
+
 ## 目录结构
 
 ```
@@ -163,6 +194,9 @@ rm27_vision/
 > 建议阅读顺序：先看「核心」的四个库 + 一个节点，再按需看「工具」（评测口径）与「教学」（推导过程）。
 
 ## 环境与依赖
+
+> **缺依赖怎么装**：直接跑 `bash scripts/check_env.sh`，它会逐项检查并打印可复制的安装命令；
+> 常见缺失的汇总表见上面「第二步：环境配置」。
 
 **必备**
 
@@ -817,3 +851,4 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | **v3.5** | 2026-09-11 | 突出核心：顶部「快速开始」只引导到题3（clone → `scripts/setup.sh` → `ros2 launch`）；原「30 秒快速验证」改为 **「快速验证（题3：两种素材 × 两种检测器）」**，只保留题3 的 4 条命令（demo 视频 / 海康相机流 × bbox / pose）与各自预期效果，题1、题2 的验证命令回归各自小节 |
 | **v3.6** | 2026-09-11 | 如实标注模型强弱：说明 **bbox 模型是本仓库自训（训练量小、效果一般）**，**推荐使用深大 26 开源的 pose 模型**并标注其来源；新增文末 **「参考仓库与教程」**（10 条带链接，首位即深大 RobotPilots 的模型开源帖） |
 | **v3.7** | 2026-09-11 | 文档分层：原 `docs/notes.md` 整体改名为 **`docs/log.md`（过程日志，内容与章号一字不改）**；新建 **`docs/notes.md`（按主题归纳的总结，9 节，每条结论标注 `log.md §` 出处）**；README 中原先指向"过程/证据"的引用统一改指 `log.md`，并新增指向归纳笔记的入口；完成 README ↔ notes ↔ log 三重交叉验证 |
+| **v3.8** | 2026-09-11 | 顶部重排为**三步**（clone → 环境配置 → 快速验证）消除原「快速开始/快速验证」的重合；新增 **`scripts/check_env.sh` 环境自检脚本**（逐项检查系统/工具链/ROS2 与所需包/colcon/OpenCV/可选 ORT 与 MVS SDK/仓库素材，缺失项直接给出安装命令，退出码可判成败）；「环境与依赖」补指向自检的入口 |
