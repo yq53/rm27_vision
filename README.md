@@ -24,7 +24,7 @@
 
 ```
 rm27_vision/
-├── models/                    # ONNX 模型（自训 bbox 模型；第三方权重不入库，见「许可说明」）
+├── models/                    # ONNX 模型：自训 bbox 模型 + third_party/ 下第三方四关键点权重（见「许可说明」）
 ├── data/                      # demo.avi 测试素材 + camera.yaml 相机配置（现场只改 serial_number）
 │
 ├── 01_detector/               # 题1：检测器
@@ -79,7 +79,7 @@ rm27_vision/
 
   ```bash
   ORT_DIR=$HOME/onnxruntime-linux-x64-1.23.2
-  POSE_MODEL=$HOME/models/Infantry-v8n-fp16.onnx
+  POSE_MODEL=models/third_party/Infantry-v8n/Infantry-v8n-fp16-20260726-D1.8w-B16.onnx
   ```
 
 ## 构建
@@ -152,7 +152,9 @@ CPU 上用 OpenCV DNN 推理（**无需 onnxruntime、无需 GPU**）。训练�
 模型直接回归 4 个**灯条端点**，绕过"bbox 四角近似"这一步，从根上提高 PnP 的角点质量。
 
 - **来源与许可**：深大 RobotPilots 开源的 `Infantry-v8n`（YOLOv8n-Pose 重设计头）。
-  仓库标称 MIT，但**ONNX 元数据标注 AGPL-3.0（Ultralytics）** → 本仓库**不提交该权重**，请自行下载。
+  权重**随仓库提交**在 `models/third_party/Infantry-v8n/`；上游标称 MIT，但其 **ONNX 元数据标注
+  AGPL-3.0（Ultralytics）** → 本仓库**不对该权重做 MIT 声明**。来源、文件名、校验和与模型元信息
+  见该目录的 `SOURCE.md`，许可边界见下文「许可说明」。
 - **输入几何**：`480×640`（4:3，与相机/素材同比例 → letterbox 退化为纯缩放，无灰边）；
   对比自训 bbox 模型的 `640×640`（4:3 素材需上下各补 80 行灰边，画布 25% 是废像素）。
 - **输出布局**（实测确认，`21 × 6300`）：`row4..12` = 9 个类别分数，`row13..20` = 4 个关键点 (x,y)，
@@ -341,7 +343,7 @@ ros2 run rqt_image_view rqt_image_view /armor/annotated
 
 ```bash
 ORT_DIR=$HOME/onnxruntime-linux-x64-1.23.2                       # ORT 解压目录（构建时 -DONNXRUNTIME_DIR 同一个）
-POSE_MODEL=$HOME/models/Infantry-v8n-fp16-20260726.onnx          # 四关键点原始导出件
+POSE_MODEL=models/third_party/Infantry-v8n/Infantry-v8n-fp16-20260726-D1.8w-B16.onnx   # 随仓库提交
 
 ros2 run rm_armor_visualization armor_tracker_node --ros-args \
     -p video_path:=data/demo.avi -p detector:=pose -p pose_model_path:="$POSE_MODEL"
@@ -406,7 +408,7 @@ export LD_LIBRARY_PATH=/opt/MVS/lib/64:$LD_LIBRARY_PATH     # 运行期找 .so �
 | 想验证什么 | 看这里 | 怎么复现 |
 |---|---|---|
 | 题1 检出效果 | `docs/screenshots/detector_preview_*.png` | `./build/01_detector/armor_demo` |
-| 检测器 A/B 全量指标 | `results/eval_*_summary.txt` | `eval_demo` + `compare_eval.py`（见题2） |
+| 检测器 A/B 全量指标 | `results/eval_*_summary.txt` | `eval_demo`（bbox 用自训模型，pose 用 `models/third_party/` 下的模型）+ `compare_eval.py` |
 | 题2 平滑效果 | `results/tracker_demo.avi` | `./build/02_tracker/tracker_demo` |
 | 题2 PnP 闭环正确性 | notes §11.6（数字可复算） | `./build/02_tracker/pnp_demo` |
 | ② 负结果原始证据 | `results/corner_*`（需 `RM_CORNER_DEBUG=1`） | `eval_demo ... refine` |
@@ -440,10 +442,16 @@ export LD_LIBRARY_PATH=/opt/MVS/lib/64:$LD_LIBRARY_PATH     # 运行期找 .so �
 
 ## 许可说明
 
-- **代码**：MIT（见 `LICENSE`，与 `rm_interfaces`、`03_visualization` 的 `package.xml` 声明一致）。
-- **权重**：本仓库提交的自训 ONNX 模型由 Ultralytics YOLOv8 训练链产出，其 ONNX 元数据标注
-  `AGPL-3.0`；代码许可与权重许可**不是一回事**，若需再分发权重请自行确认许可条件。
-  深大 `Infantry-v8n` 权重**未入库**，需自行下载。
+本仓库的许可**按内容分层**，不是单一许可：
+
+| 内容 | 许可 | 说明 |
+|---|---|---|
+| 代码（`01_detector` / `02_tracker` / `03_visualization` / `04_hik` / `rm_interfaces`） | **MIT**（见根目录 `LICENSE`） | 与两个 `package.xml` 的声明一致 |
+| `models/armor_yolov8n.onnx`、`models/armor_yolov8n_dark.onnx`（自训） | 按其 ONNX 元数据：**AGPL-3.0** | 由 Ultralytics YOLOv8 训练链产出，元数据自带 `license = AGPL-3.0 (https://ultralytics.com/license)` |
+| `models/third_party/Infantry-v8n/`（第三方） | 按其自身许可：**AGPL-3.0** | 深大 RobotPilots 开源权重，**非本仓库原创**；来源、校验和见该目录 `SOURCE.md` |
+
+即：**代码用 MIT，模型权重沿用各自上游许可**，本仓库不对权重做 MIT 声明。
+若需闭源商业使用这些权重，请自行确认或获取上游（Ultralytics）的企业许可。
 
 ## 修订记录
 
@@ -452,3 +460,4 @@ export LD_LIBRARY_PATH=/opt/MVS/lib/64:$LD_LIBRARY_PATH     # 运行期找 .so �
 | v1.0 | 2026-09-08 | 三题初稿运行说明 + 证据截图 |
 | v2.0 | 2026-09-09 | 复盘后重构：三题并列结构、状态总览表、补题2 运行/指标、FAQ、参考资料对照；修复录屏死链（.gitignore 白名单） |
 | **v3.0** | 2026-09-11 | 按考核题面重写全文：补「考核要求对照」表；新增题2 评测基础设施（口径 + 687 帧 A/B 表）与两条 v2 负结果；题1 补四关键点检测器（输入几何/关键点语义/后端要求）；题3 补检测器选择、真实相机与可视化路线、海康相机；新增 04_hik 说明、证据与复现索引、许可说明 |
+| **v3.1** | 2026-09-11 | 四关键点权重**入库**（`models/third_party/Infantry-v8n/` + `SOURCE.md`）：消除"复现最好那条路需先自行下载模型"的门槛；「许可说明」改为按内容分层（代码 MIT / 权重沿用上游 AGPL） |
