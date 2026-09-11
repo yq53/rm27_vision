@@ -24,6 +24,20 @@ target_link_libraries(corner_demo PRIVATE armor_detector ${OpenCV_LIBS})
 add_executable(pnp_demo src/pnp_demo.cpp)
 target_link_libraries(pnp_demo PRIVATE armor_detector ${OpenCV_LIBS})
 
+# PnP 共用库：位姿解算 + 重投影误差/yaw 指标（评测与后续角点升级共用）
+add_library(armor_pnp STATIC src/armor_pnp.cpp)
+target_include_directories(armor_pnp PUBLIC include)
+target_link_libraries(armor_pnp PUBLIC ${OpenCV_LIBS})
+
+# 角点精修库（v2）：ROI 内灯条检测 + PCA 端点 + 亮度梯度修正
+add_library(armor_corner STATIC src/armor_corner.cpp)
+target_include_directories(armor_corner PUBLIC include)
+target_link_libraries(armor_corner PUBLIC ${OpenCV_LIBS})
+
+# 评测工具：detector -> 角点(bbox/refine) -> PnP -> EKF，输出逐帧 CSV + 汇总指标
+add_executable(eval_demo src/eval_demo.cpp)
+target_link_libraries(eval_demo PRIVATE armor_detector armor_pose_detector armor_ekf armor_pnp armor_corner ${OpenCV_LIBS})
+
 # L7：ArmorEKF 库（头文件在 include/，与 01_detector 同款规范）
 add_library(armor_ekf STATIC src/armor_ekf.cpp)
 target_include_directories(armor_ekf PUBLIC include)
