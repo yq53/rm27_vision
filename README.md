@@ -2,7 +2,7 @@
 
 视觉方向三小题的完整实现：**装甲板识别（detector）→ 装甲板跟踪（tracker）→ 接入真实相机 + 可视化**。
 按题分目录组织，每部分可独立构建、运行、复现；学习过程、原理问答、踩坑与负结果的完整记录见
-`docs/notes.md`（知识记录 + 工作日志，23 章）。
+`docs/log.md`（过程日志，23 章：问答/推导/踩坑/负结果原文）+ `docs/notes.md`（按主题归纳的速查总结）。
 
 - 代码：C++17 + OpenCV（题1 / 题2 为普通 CMake，题3 为 ROS2 Humble ament / colcon）
 - 素材：`data/demo.avi`（687 帧，自录，**只作测试集、永不进训练**）；模型全部随仓库提供
@@ -141,7 +141,8 @@ rm27_vision/
 ├── scripts/setup.sh           # 一键配置环境 + 构建（不启动任何程序；启动统一交给 launch，见题3）
 ├── rm_interfaces/             # 自定义消息接口包（ArmorState.msg）
 ├── docs/
-│   ├── notes.md               # 学习笔记（23 章：原理问答 + 踩坑 + 负结果 + 工作记录）
+│   ├── notes.md               # 主题归纳（架构/常数/口径/踩坑速查/术语，每条结论标 log 出处）
+│   ├── log.md                 # 过程日志（23 章）：概念问答、推导、踩坑、负结果原始记录
 │   └── screenshots/           # 运行效果截图（题1 预览 + 题3 真实相机证据）
 └── results/                   # 运行输出（生成物不入库；唯一入库的证据录屏 real_camera_2026-09-09.mkv）
 ```
@@ -157,7 +158,7 @@ rm27_vision/
 | **工具**（非运行时，但决定"指标能不能复现"） | `02_tracker/src/eval_demo.cpp`、`02_tracker/scripts/compare_eval.py`、`01_detector/scripts/convert_fp16_to_fp32.py` | 主节点照常，但 687 帧 A/B 表无法复现 |
 | **使用体验（可选，删掉不影响任何功能）** | `scripts/setup.sh`、`03_visualization/src/armor_state_printer.cpp` | 少掉"一键配置环境+构建"和"终端里的状态数字" |
 | **教学 / 演示**（学习过程留档） | `01_detector/src/demo_main.cpp`；`02_tracker/src/{projection,corner,pnp,tracker,lightbar}_demo.cpp`；`03_visualization/src/armor_video_node.cpp`；`04_hik/src/*.cpp` | 无影响 |
-| **负结果存档** | `02_tracker/src/armor_corner.cpp`、`light_bar_detector.cpp` | 无影响（只被 `eval_demo` 的两个可选模式引用；证据见 notes §15、§21.1） |
+| **负结果存档** | `02_tracker/src/armor_corner.cpp`、`light_bar_detector.cpp` | 无影响（只被 `eval_demo` 的两个可选模式引用；证据见 log.md §15、§21.1） |
 
 > 建议阅读顺序：先看「核心」的四个库 + 一个节点，再按需看「工具」（评测口径）与「教学」（推导过程）。
 
@@ -270,12 +271,12 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 
 **这个模型是本仓库自己训练的**：训练数据为自己录制的比赛/演示视频抽帧标注（量小），
 CPU 上用 OpenCV DNN 推理（**无需 onnxruntime、无需 GPU**）。
-协议：`data/demo.avi` 只当测试集、**永不进训练**（域差实验与协议见 notes §16）。
+协议：`data/demo.avi` 只当测试集、**永不进训练**（域差实验与协议见 log.md §16）。
 
 | 模型 | 说明 |
 |---|---|
-| `models/armor_yolov8n.onnx` | 单类别 `armour`，640×640 输入，验证集 mAP50≈0.97（训练记录见 notes §3） |
-| `models/armor_yolov8n_dark.onnx` | 暗化增强微调实验模型，**负结果存档，勿用**（mAP50 保持 0.974 但跨域无提升，见 notes §16） |
+| `models/armor_yolov8n.onnx` | 单类别 `armour`，640×640 输入，验证集 mAP50≈0.97（训练记录见 log.md §3） |
+| `models/armor_yolov8n_dark.onnx` | 暗化增强微调实验模型，**负结果存档，勿用**（mAP50 保持 0.974 但跨域无提升，见 log.md §16） |
 
 #### 一般用法
 
@@ -327,7 +328,7 @@ CPU 上用 OpenCV DNN 推理（**无需 onnxruntime、无需 GPU**）。
 
 #### 已知局限（诚实声明）
 
-- 暗光下可能把一个装甲板的两个灯条误检成两个装甲（两框 IoU≈0，NMS 不合并；根因在模型层，见 notes §15）。
+- 暗光下可能把一个装甲板的两个灯条误检成两个装甲（两框 IoU≈0，NMS 不合并；根因在模型层，见 log.md §15）。
 - 过小 / 模糊 / 镜头切换会漏检——单帧检测的正常局限，正是题2 tracker 用跨帧信息弥补的场景。
 
 ### 方案 B：四关键点模型（可选，直出灯条端点）
@@ -345,11 +346,11 @@ CPU 上用 OpenCV DNN 推理（**无需 onnxruntime、无需 GPU**）。
   无逐点置信度；框由 `boundingRect(4 点)` 推出。
 - **关键点语义**：4 个点是**两根灯条的端点，不是板四角** → PnP 物体模型必须用 `135mm × 56mm`
   （`barEndObjectPoints`），索引映射 `kp0/kp3/kp2/kp1 → TL/TR/BR/BL`。
-  用错的代价：板四角模型重投影 8.09 px、反向绕向 25.64 px，正确为 **1.09 px**（详见 notes §20.2）。
+  用错的代价：板四角模型重投影 8.09 px、反向绕向 25.64 px，正确为 **1.09 px**（详见 log.md §20.2）。
 - **推理后端**：该导出图**在 OpenCV 4.x 的 cv2.dnn 上不可用**（入口 Cast 节点解析失败；转 fp32 后改为
-  解码段 `NaryEltwise` 广播断言失败；python cv2 5.0 实测可跑，见 notes §20.3）→ 本工程用
+  解码段 `NaryEltwise` 广播断言失败；python cv2 5.0 实测可跑，见 log.md §20.3）→ 本工程用
   **ONNX Runtime** 构建（「构建 C」）。ORT 使用**原始导出件**，
-  `scripts/convert_fp16_to_fp32.py` 的产物只适用于 cv2.dnn。
+  `01_detector/scripts/convert_fp16_to_fp32.py` 的产物只适用于 cv2.dnn。
   未启用 ORT 的构建若被要求 `detector:=pose`，会在构造检测器时**明确抛异常并提示重新构建**（exit 255），不会静默失效。
 
 运行方式见「题3 → 检测器选择」；A/B 量化对比见「题2 → 687 帧实测」。
@@ -433,7 +434,7 @@ python3 02_tracker/scripts/compare_eval.py baseline pose
 
 - `tracker_demo` 300 帧：相邻帧距离跳动 **raw 0.042 → EKF 0.020 m（抖动减半）**，
   平均距离 raw 0.654 vs EKF 0.668 m（平滑不掉真值）；
-- `pnp_demo` A 段合成闭环：距离/偏航解算误差≈0、重投影≈0 px（推导见 notes §11.6）。
+- `pnp_demo` A 段合成闭环：距离/偏航解算误差≈0、重投影≈0 px（推导见 log.md §11.6）。
 
 ### 离线评测基础设施（`eval_demo`）
 
@@ -448,7 +449,7 @@ python3 02_tracker/scripts/compare_eval.py tagA tagB      # 至少给两个 tag
 （参数顺序固定；`pose` 是**第 6 个**参数，`<corner_mode>` 是第 5 个。传错会拿 pose 模型去构造 bbox 检测器。）
 
 - 指标：检出率、PnP 通过率、重投影误差、原始/EKF 距离与抖动、检测耗时、偏航角
-- **口径定义**（notes §20.4）：
+- **口径定义**（log.md §20.4）：
   - `jitter` = **相邻且帧号连续**的有效帧之间的距离差分均值 `|d_i − d_{i−1}|`，样本数 `n` 一并输出
     （跨漏检空档不计、首帧不计——避免把"漏检造成的跳变"算成抖动）；
   - `NaN` = "本帧无有效值"（与真实的 0 区分）；`numeric_limits::max()` 作比较哨兵、`quiet_NaN()` 作缺失标记，二者不混用；
@@ -482,8 +483,8 @@ python3 02_tracker/scripts/compare_eval.py tagA tagB      # 至少给两个 tag
 
 | 路线 | 做法 | 结果 | 处置 |
 |---|---|---|---|
-| `light_bar_detector` + `lightbar_demo`（notes §15） | 框内阈值 + 连通块 + 灯条配对拼板 | demo.avi **配对率仅 7%**：板大多大角度侧转，两灯条在画面里几乎重叠成一块 | **冻结**（设计决策与三级容错方案留档） |
-| `armor_corner`（notes §21.1） | ROI → Otsu/轮廓 → PCA 主轴取端点 → 亮度梯度修正 → 四边形合理性闸门 | 中间档闸门下仅 **0.4% 的检出帧**精修成功（`bars_mean≈0.92`，大偏航常只可见**单根**灯条）；严格档 0% | **默认关闭**，不接入主节点 |
+| `light_bar_detector` + `lightbar_demo`（log.md §15） | 框内阈值 + 连通块 + 灯条配对拼板 | demo.avi **配对率仅 7%**：板大多大角度侧转，两灯条在画面里几乎重叠成一块 | **冻结**（设计决策与三级容错方案留档） |
+| `armor_corner`（log.md §21.1） | ROI → Otsu/轮廓 → PCA 主轴取端点 → 亮度梯度修正 → 四边形合理性闸门 | 中间档闸门下仅 **0.4% 的检出帧**精修成功（`bars_mean≈0.92`，大偏航常只可见**单根**灯条）；严格档 0% | **默认关闭**，不接入主节点 |
 
 - `armor_corner` 的实测调试图（ROI / 二值图 / 叠加）在设了环境变量 `RM_CORNER_DEBUG`（**任意值**，含 `0`）
   后输出到 `results/corner_dbg_*.png`；不设则完全不落盘。
@@ -498,7 +499,7 @@ python3 02_tracker/scripts/compare_eval.py tagA tagB      # 至少给两个 tag
 ### 已知局限（v1 简化）
 
 - **单目标**：每帧挑**面积最大**的板（≈最近）。两块板交替最大时会跳目标——多目标跟踪需要数据关联 +
-  每目标一个滤波器，未做（理由见 notes §14.3）。
+  每目标一个滤波器，未做（理由见 log.md §14.3）。
 - 无装甲数字识别、无整车位姿估计、无目标预测；内参未标定（见题3 局限）。
 
 ---
@@ -669,16 +670,16 @@ ros2 launch rm_armor_visualization armor_tracker.launch.py source:=hik use_rqt:=
   `/armor/state` 可以用 `ros2 topic echo` 直接看。
 - **Foxglove**：标准 `sensor_msgs/Image` 可直接订阅；自定义消息需要加载 `rm_interfaces` 的定义。
   P0 阶段曾用它做过 `/armor/state → 3D 位姿` 的展示节点，因不属于题面必需、且要动稳定文件而**回档移除**
-  （notes §17.4），需要时可作为扩展重新接上。
+  （log.md §17.4），需要时可作为扩展重新接上。
 - 未接仿真器：题面要求"可接入仿真、真实相机验证算法"，本工程走通**真实相机**路线；
   河科视觉仿真器（内参精确已知）是后续可选项。
 
 ### 已知局限
 
 - **内参为演示级近似**：按分辨率 + 假定水平 FOV≈72° 推导（`computeK`），未做棋盘格标定 →
-  距离量级可信、绝对精度需标定（接入新相机前需要标定的必要性见 notes §8.11；**标定本身尚未做**）。
+  距离量级可信、绝对精度需标定（接入新相机前需要标定的必要性见 log.md §8.11；**标定本身尚未做**）。
 - **可视化带宽**：1440×1080×3 ≈ 4.67 MB/帧，30 Hz ≈ 140 MB/s，本机 rqt 订阅端吃力（表现为"卡"）；
-  曾实现"限流 + 缩放"两参数，按要求回档——真机相机流阶段再处理（notes §20.7）。
+  曾实现"限流 + 缩放"两参数，按要求回档——真机相机流阶段再处理（log.md §20.7）。
 - 单目标、无数字识别、无整车位姿（同题2 局限）。
 
 ---
@@ -717,7 +718,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
   再 `export LD_LIBRARY_PATH=/opt/MVS/lib/64:$LD_LIBRARY_PATH`。
 - 取帧数传非数字会抛未捕获异常、进程 abort（退出 134）——传数字即可。
 - 主节点用的是封装后的版本（`image_source.cpp` 的 `#ifdef RM_USE_HIK_SDK` 段 + `data/camera.yaml`）：
-  **现场展示只需改 `data/camera.yaml` 里的 `serial_number`，代码不用动**。踩坑记录见 notes §19。
+  **现场展示只需改 `data/camera.yaml` 里的 `serial_number`，代码不用动**。踩坑记录见 log.md §19。
 
 > **验证边界（如实说明）**：本工程开发机上**没有海康相机**，所以这条通路验证到
 > 「枚举到 0 台设备并优雅提示、退出码 0」为止；`StartGrabbing` → `GetImageBuffer` → `cv::Mat`
@@ -740,12 +741,13 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 |---|---|---|
 | 题1 检出效果 | `docs/screenshots/detector_preview_*.png` | `./build/01_detector/armor_demo data/demo.avi models/armor_yolov8n.onnx 240` |
 | 检测器 A/B 全指标 | 本文件「687 帧实测」表 | 两条 `eval_demo` + `compare_eval.py`（见题2 快速验证第 3 条） |
-| 题2 PnP 解算正确性 | notes §11.6（数字可复算） | `./build/02_tracker/pnp_demo data/demo.avi models/armor_yolov8n.onnx 120` |
+| 题2 PnP 解算正确性 | log.md §11.6（数字可复算） | `./build/02_tracker/pnp_demo data/demo.avi models/armor_yolov8n.onnx 120` |
 | 题2 平滑效果 | —（生成物） | `./build/02_tracker/tracker_demo data/demo.avi models/armor_yolov8n.onnx 300` → `results/tracker_demo.avi` |
 | ② 角点精修负结果 | —（调试图生成物） | `RM_CORNER_DEBUG=1 ./build/02_tracker/eval_demo data/demo.avi models/armor_yolov8n.onnx 200 t_refine refine bbox` → `results/corner_dbg_*.png` |
 | 题3 真实相机验证 | `results/real_camera_2026-09-09.mkv`、`docs/screenshots/phone_rqt.png` | `source:=ip` + 手机横屏 |
 | pose 模式的可视化 | `docs/screenshots/pose_rqt.png` | `ros2 launch rm_armor_visualization armor_tracker.launch.py detector:=pose pose_model_path:="$POSE_MODEL" use_rqt:=true` |
-| 原理与踩坑全过程 | `docs/notes.md`（23 章） | 按目录读；§20（四关键点与评测）、§21（负结果全录 + 交付对照）、§22（与 README 的双向对照）是本轮核心 |
+| 快速建立整体认识 | `docs/notes.md`（**主题归纳**，9 节） | 架构 / 关键常数 / 两种检测器 / 语义与后端 / 位姿与滤波 / 评测口径 / 踩坑速查 / 负结果 / 术语表 |
+| 原理、推导与踩坑全过程 | `docs/log.md`（**过程日志**，23 章） | 按 §0 目录读；§20（四关键点与评测）、§21（负结果全录 + 交付对照）、§22（三重交叉验证）是本轮核心 |
 
 ## FAQ
 
@@ -762,7 +764,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | rqt 打开后是渐变占位图 | 手动下拉常没真正订阅 → 直接带话题：`rqt_image_view rqt_image_view /armor/annotated` |
 | 手机流 "Stream ends prematurely" | URL 少了 `/video` 后缀 |
 | 检测框在但 z<0 / 距离乱跳 | 手机竖屏（旋转元数据）→ 横屏解决 |
-| 距离绝对值和真实差一截 | 内参未标定（HFOV≈72° 近似）→ 只论量级；为什么要标定见 notes §8.11（标定本身尚未做） |
+| 距离绝对值和真实差一截 | 内参未标定（HFOV≈72° 近似）→ 只论量级；为什么要标定见 log.md §8.11（标定本身尚未做） |
 | 从别的目录启动后节点立刻退出 | 相对路径失效 → 加 `repo_root:=/绝对/路径/rm27_vision` |
 
 ## 参考仓库与教程
@@ -771,7 +773,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 
 | # | 开源项目 / 教程 | 链接 | 我们用到了什么 |
 |---|---|---|---|
-| 1 | **深圳大学 RobotPilots｜RM2026 视觉模型统一部署库与识别模型开源** | https://bbs.robomaster.com/article/1942761 | **直接使用了其中的四关键点模型 `Infantry-v8n`**（题1 方案 B / `detector:=pose`）：权重随仓库提交在 `models/third_party/Infantry-v8n/`，来源与 sha256 见该目录 `SOURCE.md`，关键点语义按 notes 实测确认 |
+| 1 | **深圳大学 RobotPilots｜RM2026 视觉模型统一部署库与识别模型开源** | https://bbs.robomaster.com/article/1942761 | **直接使用了其中的四关键点模型 `Infantry-v8n`**（题1 方案 B / `detector:=pose`）：权重随仓库提交在 `models/third_party/Infantry-v8n/`，来源与 sha256 见该目录 `SOURCE.md`，关键点语义按 `log.md §20.2` 实测确认 |
 | 2 | 同济大学 SuperPower｜`sp_vision_25` 视觉框架 | https://github.com/TongjiSuperPower/sp_vision_25 | 灯条端点 3D 建模思路、装甲板尺寸 135×125 / 230×127、灯条长度 56mm 的出处 → 本工程 `barEndObjectPoints`（源码曾在工作区本地 `reference/` 对照阅读，**未随本仓库发布**） |
 | 3 | 河北科技大学 Actor&Thinker｜RM2026 视觉算法仿真器 | https://bbs.robomaster.com/article/1887395 | "仿真里内参精确已知"的思路（本工程未接入，列为后续可选项） |
 | 4 | 河北科技大学 Actor&Thinker｜RM2026 YOLO26 端到端装甲板 ONNX 模型 | https://bbs.robomaster.com/article/1886180 | 端到端 / keypoint 类识别模型的对照阅读 |
@@ -783,7 +785,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | 10 | OpenCV · ROS2 Humble | https://opencv.org · https://docs.ros.org/en/humble | 基础依赖 |
 
 > 社区帖链接需要登录 RoboMaster 社区才能查看；若失效可按标题在社区内搜索。
-> 我们对这些项目的学习、对照与踩坑过程记录在 `docs/notes.md`。
+> 我们对这些项目的学习、对照与踩坑过程记录在 `docs/log.md`（过程日志），结论归纳在 `docs/notes.md`。
 
 ## 许可说明
 
@@ -814,3 +816,4 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | **v3.4** | 2026-09-11 | 职责收窄：`scripts/demo.sh`（会启动程序）改为 **`scripts/setup.sh`（只配置环境 + 构建，不启动任何程序）**，启动入口统一收敛到 `ros2 launch`；`setup.sh` 会自动探测 ONNX Runtime / MVS SDK 并把 bbox 与 pose 两条通路都编好，收尾打印两条素材 demo.avi 的启动命令；更换带 `detector: pose` 标签的 rqt 截图 |
 | **v3.5** | 2026-09-11 | 突出核心：顶部「快速开始」只引导到题3（clone → `scripts/setup.sh` → `ros2 launch`）；原「30 秒快速验证」改为 **「快速验证（题3：两种素材 × 两种检测器）」**，只保留题3 的 4 条命令（demo 视频 / 海康相机流 × bbox / pose）与各自预期效果，题1、题2 的验证命令回归各自小节 |
 | **v3.6** | 2026-09-11 | 如实标注模型强弱：说明 **bbox 模型是本仓库自训（训练量小、效果一般）**，**推荐使用深大 26 开源的 pose 模型**并标注其来源；新增文末 **「参考仓库与教程」**（10 条带链接，首位即深大 RobotPilots 的模型开源帖） |
+| **v3.7** | 2026-09-11 | 文档分层：原 `docs/notes.md` 整体改名为 **`docs/log.md`（过程日志，内容与章号一字不改）**；新建 **`docs/notes.md`（按主题归纳的总结，9 节，每条结论标注 `log.md §` 出处）**；README 中原先指向"过程/证据"的引用统一改指 `log.md`，并新增指向归纳笔记的入口；完成 README ↔ notes ↔ log 三重交叉验证 |
