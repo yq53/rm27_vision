@@ -5,6 +5,7 @@
     ros2 launch rm_armor_visualization armor_tracker.launch.py source:=ip ip_url:=http://<手机IP>:8080/video
     ros2 launch rm_armor_visualization armor_tracker.launch.py source:=hik          # 现场海康(读 camera.yaml)
     ros2 launch rm_armor_visualization armor_tracker.launch.py use_rqt:=true        # 附带 rqt 看图
+    ros2 launch rm_armor_visualization armor_tracker.launch.py use_rqt:=true print_state:=true  # 图 + 终端里的状态数字
     ros2 launch rm_armor_visualization armor_tracker.launch.py repo_root:=$HOME/xxx/rm27_vision   # 任意目录启动
 
 说明:
@@ -99,6 +100,16 @@ def _launch_setup(context, *args, **kwargs):
             output="screen",
         )
     )
+    # ⑤ 可选：把 /armor/state 打到终端（省掉第二个终端跑 ros2 topic echo）
+    actions.append(
+        Node(
+            package="rm_armor_visualization",
+            executable="armor_state_printer",
+            name="armor_state_printer",
+            condition=IfCondition(LaunchConfiguration("print_state")),
+            output="screen",
+        )
+    )
     return actions
 
 
@@ -114,6 +125,7 @@ def generate_launch_description():
             DeclareLaunchArgument("pose_model_path", default_value="", description="detector:=pose 时的四关键点模型路径"),
             DeclareLaunchArgument("repo_root", default_value=".", description="仓库根目录(相对路径的基准, 可给绝对路径)"),
             DeclareLaunchArgument("use_rqt", default_value="false", description="是否附带启动 rqt_image_view"),
+            DeclareLaunchArgument("print_state", default_value="false", description="是否附带启动 armor_state_printer(把 /armor/state 打到终端)"),
             DeclareLaunchArgument("rmw", default_value="rmw_fastrtps_cpp", description="RMW 实现(本机需 FastDDS)"),
             DeclareLaunchArgument("mvs_lib_dir", default_value="/opt/MVS/lib/64", description="source:=hik 时的 MVS 库目录"),
             OpaqueFunction(function=_launch_setup),

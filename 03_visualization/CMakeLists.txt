@@ -52,7 +52,12 @@ if(USE_HIK_SDK)
   target_link_libraries(armor_tracker_node MvCameraControl yaml-cpp)
 endif()
 
-install(TARGETS armor_video_node armor_tracker_node DESTINATION lib/${PROJECT_NAME})
+# 状态打印机（可选，launch 的 print_state:=true）：订阅 /armor/state 打到终端，省掉第二个终端
+# 只是额外订阅者，删除它不影响主链路
+add_executable(armor_state_printer src/armor_state_printer.cpp)
+ament_target_dependencies(armor_state_printer rclcpp rm_interfaces)
+
+install(TARGETS armor_video_node armor_tracker_node armor_state_printer DESTINATION lib/${PROJECT_NAME})
 
 # 安装 launch 文件（ros2 launch rm_armor_visualization armor_tracker.launch.py）
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})

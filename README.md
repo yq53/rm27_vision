@@ -8,6 +8,38 @@
 - 素材：`data/demo.avi`（687 帧，自录，**只作测试集、永不进训练**）；模型全部随仓库提供
 - 评测：`eval_demo` 统一口径离线评测（逐帧 CSV + 汇总），本 README 里的指标数字都可复现
 
+## 快速开始（clone → 跑起来）
+
+```bash
+# 1) 克隆（地址换成你自己的仓库）
+git clone https://github.com/your-name/rm27_vision.git
+cd rm27_vision
+
+# 2) 编译题1 / 题2（只需 OpenCV：不需要 GPU，也不需要 onnxruntime）
+cmake -S 01_detector -B build/01_detector -DCMAKE_BUILD_TYPE=Release && cmake --build build/01_detector -j
+cmake -S 02_tracker  -B build/02_tracker  -DCMAKE_BUILD_TYPE=Release && cmake --build build/02_tracker  -j
+
+# 3) 看题1 的检测效果（约 15 s，产物 results/detector_demo.avi）
+./build/01_detector/armor_demo data/demo.avi models/armor_yolov8n.onnx 240
+```
+
+想看完整链路（ROS2 + rqt 可视化 + 终端里的状态数字）：
+
+```bash
+source /opt/ros/humble/setup.bash
+colcon build --packages-up-to rm_armor_visualization
+source install/setup.bash
+
+bash scripts/demo.sh                                   # 一条命令：环境准备 + 视频源 + bbox + rqt
+# 等价手工版：
+ros2 launch rm_armor_visualization armor_tracker.launch.py use_rqt:=true print_state:=true
+```
+
+- **前置**：Ubuntu 22.04 · ROS2 Humble · OpenCV 4.x · C++17（详见「环境与依赖」）。
+- **仓库自带**测试素材 + 两个检测器模型，**不需要额外下载任何东西**；只有两个可选项要自己装：
+  ONNX Runtime（四关键点检测器 `detector:=pose`）与海康 MVS SDK（真机相机 `source:=hik`）。
+- 每一步该看到什么，见下面的「30 秒快速验证」——**每条命令都写了「预期效果」**。
+
 ## 考核要求对照
 
 | 题 | 题面要求 | 本仓库交付 | 状态 | 证据 |
@@ -45,14 +77,16 @@
 
 ```bash
 # 题3：ROS2 全链路 + rqt 可视化窗口（需先按「构建 B」colcon build）
-bash scripts/demo.sh                                  # 脚本版：自动做环境准备 + 带 rqt
+bash scripts/demo.sh print_state:=true                # 脚本版：环境准备 + rqt + 终端状态数字
 # 等价的手工版（三行）：
 source /opt/ros/humble/setup.bash && source install/setup.bash
-ros2 launch rm_armor_visualization armor_tracker.launch.py use_rqt:=true
-# 预期效果：终端出现两行 INFO —— "检测器: bbox models/armor_yolov8n.onnx" 与
-#   "publishing /armor/annotated & /armor/state"；
+ros2 launch rm_armor_visualization armor_tracker.launch.py use_rqt:=true print_state:=true
+# 预期效果：终端出现两种 INFO ——
+#   主节点："检测器: bbox models/armor_yolov8n.onnx" 与 "publishing /armor/annotated & /armor/state"
+#   打印机（每秒一行）："d=0.52 m  pos=(0.07, -0.05, 0.51)  v=(0.00, 0.00, 0.00)"
 #   rqt 窗口自动弹出并播放 data/demo.avi，装甲板被绿框套住，左上角有两行黄字：
 #   第一行 detector: bbox，第二行 d=…m v=(…)
+#   （不想开 rqt 就把 use_rqt 去掉；不需要终端数字就把 print_state 去掉）
 ```
 
 ```bash
@@ -92,6 +126,7 @@ rm27_vision/
 │   ├── src/armor_tracker_node.cpp     #   主节点（完整链路）
 │   ├── src/armor_video_node.cpp       #   P0 教学示例（仅 detector → 标注图）
 │   ├── src/image_source.hpp / .cpp    #   图像源抽象（video / ip / hik）
+│   ├── src/armor_state_printer.cpp    #   可选：[工具] 把 /armor/state 打到终端（launch 的 print_state:=true）
 │   └── launch/armor_tracker.launch.py #   一键启动
 ├── 04_hik/                    # 海康 MVS SDK 学习 demo（probe/open/grab，独立构建，不参与主构建）
 ├── scripts/demo.sh            # 一键启动脚本：环境准备 + 选检测器/图像源 + launch + rqt（见题3）
@@ -111,6 +146,7 @@ rm27_vision/
 |---|---|---|
 | **核心**（运行时必需） | `01_detector/src/armor_detector.cpp`、`armor_pose_detector.cpp`；`02_tracker/src/armor_pnp.cpp`、`armor_ekf.cpp`；`03_visualization/src/armor_tracker_node.cpp`、`image_source.hpp` / `.cpp`；`rm_interfaces/msg/ArmorState.msg`；`models/armor_yolov8n.onnx` | 主节点起不来，或少一条检测器/解算通路 |
 | **工具**（非运行时，但决定"指标能不能复现"） | `02_tracker/src/eval_demo.cpp`、`02_tracker/scripts/compare_eval.py`、`01_detector/scripts/convert_fp16_to_fp32.py` | 主节点照常，但 687 帧 A/B 表无法复现 |
+| **使用体验（可选，删掉不影响任何功能）** | `scripts/demo.sh`、`03_visualization/src/armor_state_printer.cpp` | 少掉"一条命令启动"和"终端里的状态数字" |
 | **教学 / 演示**（学习过程留档） | `01_detector/src/demo_main.cpp`；`02_tracker/src/{projection,corner,pnp,tracker,lightbar}_demo.cpp`；`03_visualization/src/armor_video_node.cpp`；`04_hik/src/*.cpp` | 无影响 |
 | **负结果存档** | `02_tracker/src/armor_corner.cpp`、`light_bar_detector.cpp` | 无影响（只被 `eval_demo` 的两个可选模式引用；证据见 notes §15、§21.1） |
 
@@ -484,6 +520,7 @@ ros2 launch rm_armor_visualization armor_tracker.launch.py [参数:=值 ...]
 | `pose_model_path` | 空 | `detector:=pose` 时**必填**（缺了节点报错退出） |
 | `repo_root` | `.` | 相对路径基准；不在仓库根目录启动时给绝对路径 |
 | `use_rqt` | `false` | 是否附带启动 `rqt_image_view` |
+| `print_state` | `false` | 是否附带启动 `armor_state_printer`：把 `/armor/state` 按 1 Hz 打到终端（**省掉第二个终端**） |
 | `rmw` | `rmw_fastrtps_cpp` | 本次启动的 RMW 实现 |
 | `mvs_lib_dir` | `/opt/MVS/lib/64` | `source:=hik` 时的 MVS 库目录 |
 
@@ -505,6 +542,13 @@ clone 者不用去记环境变量和长参数：
 它做的事就是下面手工版的开头几行：`source` ROS2 与 `install/` 环境、设 `RMW_IMPLEMENTATION` 与
 `ROS_LOG_DIR`、检查 `install/` 是否已经构建过（没构建会直接告诉你构建命令）、最后 `exec ros2 launch`。
 **手工版继续保留**（见下一小节）——不想用脚本、或想自己控制每一步时用。
+
+其余 launch 参数可以原样跟在后面**透传**，例如：
+
+```bash
+bash scripts/demo.sh pose print_state:=true    # 四关键点 + 终端每秒一行状态数字
+bash scripts/demo.sh bbox no_rqt print_state:=true
+```
 
 ### 快速验证
 
@@ -624,7 +668,7 @@ ros2 launch rm_armor_visualization armor_tracker.launch.py source:=hik use_rqt:=
 ### 已知局限
 
 - **内参为演示级近似**：按分辨率 + 假定水平 FOV≈72° 推导（`computeK`），未做棋盘格标定 →
-  距离量级可信、绝对精度需标定（标定方案见 notes §8.11）。
+  距离量级可信、绝对精度需标定（接入新相机前需要标定的必要性见 notes §8.11；**标定本身尚未做**）。
 - **可视化带宽**：1440×1080×3 ≈ 4.67 MB/帧，30 Hz ≈ 140 MB/s，本机 rqt 订阅端吃力（表现为"卡"）；
   曾实现"限流 + 缩放"两参数，按要求回档——真机相机流阶段再处理（notes §20.7）。
 - 单目标、无数字识别、无整车位姿（同题2 局限）。
@@ -710,7 +754,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | rqt 打开后是渐变占位图 | 手动下拉常没真正订阅 → 直接带话题：`rqt_image_view rqt_image_view /armor/annotated` |
 | 手机流 "Stream ends prematurely" | URL 少了 `/video` 后缀 |
 | 检测框在但 z<0 / 距离乱跳 | 手机竖屏（旋转元数据）→ 横屏解决 |
-| 距离绝对值和真实差一截 | 内参未标定（HFOV≈72° 近似）→ 只论量级；标定见 notes §8.11 |
+| 距离绝对值和真实差一截 | 内参未标定（HFOV≈72° 近似）→ 只论量级；为什么要标定见 notes §8.11（标定本身尚未做） |
 | 从别的目录启动后节点立刻退出 | 相对路径失效 → 加 `repo_root:=/绝对/路径/rm27_vision` |
 
 ## 参考资料对照
@@ -751,4 +795,4 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | v3.0 | 2026-09-11 | 按考核题面重写全文（功能层面：① 评测基础设施 + ② 角点精修负结果 + ③ 四关键点检测器）：补「考核要求对照」；新增题2 评测口径与 687 帧 A/B 表、两条 v2 负结果；题1 补四关键点检测器；题3 补检测器选择与真实相机；新增 04_hik 说明、证据索引、许可说明 |
 | v3.1 | 2026-09-11 | 文档：四关键点权重入库（`models/third_party/` + `SOURCE.md`）；「许可说明」改为按内容分层 |
 | **v3.2** | 2026-09-11 | 文档：全量命令实测校验后重写操作部分——新增「30 秒快速验证」「命令行通用约定」「文件清单：核心/工具/教学」；每题补齐「一般用法 → 快速验证 → 产物」；在源文件头加角色标签。修正 5 处与实测不符的说法（hik 的 `LD_LIBRARY_PATH` 非必需、`RM_CORNER_DEBUG` 传任意值即生效、`RMW` 只在跨 RMW 传大图时才是瓶颈、题面"仿真、真实相机"是并列而非二选一、② 的调试图是 `corner_dbg_*`）；补 `source:=hik` 时 `ros2 launch` 返回 0 但节点已死的提醒、海康通路的验证边界、pose 模式运行截图 |
-| **v3.3** | 2026-09-11 | 体验优化：新增 `scripts/demo.sh` 一键启动脚本（手工版照旧保留）；主节点在画面上叠加当前检测器模式（`detector: bbox/pose`，便于截图自证）；把两份评测汇总加入 `.gitignore` 白名单随仓库提交；每处验证步骤补「预期效果」（含常见异常判据） |
+| **v3.3** | 2026-09-11 | 体验优化：新增「快速开始（clone → 跑起来）」；新增 `scripts/demo.sh` 一键启动脚本（手工版照旧保留）；新增可选节点 `armor_state_printer` + launch 参数 `print_state`（单终端即可看到状态数字）；主节点在画面上叠加当前检测器模式（`detector: bbox/pose`，便于截图自证）；把两份评测汇总加入 `.gitignore` 白名单随仓库提交；每处验证步骤补「预期效果」（含常见异常判据）；`docs/notes.md` 同步重编目录（两级索引 + 状态标签）并新增 §22「与 README 的双向对照」 |
