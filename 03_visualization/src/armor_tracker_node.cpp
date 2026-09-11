@@ -149,7 +149,7 @@ public:
             declare_parameter<std::string>("pose_model_path", "");
 
         // detector初始化
-        if (detector_kind == "pose") {
+        if (detector_kind == "pose") {  // pose detector
             if (pose_model_path.empty()) {
                 throw std::runtime_error("detector:=pose 需要同时给出 pose_model_path");
             }
@@ -158,7 +158,7 @@ public:
             pose_detector_->setNmsThreshold(0.45f);
             object_points_ = barEndObjectPoints();
             RCLCPP_INFO(get_logger(), "检测器: pose（四关键点）%s", pose_model_path.c_str());
-        } else {
+        } else {    // bbox detector
             detector_ = std::make_unique<ArmorDetector>(model_path);
             detector_->setConfidenceThreshold(0.35f);
             detector_->setNmsThreshold(0.45f);
@@ -211,8 +211,10 @@ private:
         bool has_target = false;
         std::vector<cv::Point2d> target_corners;
 
-        if (pose_detector_) {
+        if (pose_detector_) {   // pose
             const std::vector<ArmorPose> poses = pose_detector_->detect(frame);
+
+            // 最大面积筛选
             int max_area = 0;
             for (const ArmorPose& p: poses) {
                 if (p.rect.area() > max_area) {
@@ -222,8 +224,10 @@ private:
                     has_target = true;
                 }
             }
-        } else {
+        } else {    // bbox
             const std::vector<Armor> armors = detector_->detect(frame);
+
+            // 最大面积筛选
             double max_area = 0.0;
             for (const Armor& a: armors) {
                 if (a.rect.area() > max_area) {
@@ -233,7 +237,7 @@ private:
                 }
             }
             if (has_target) {
-                target_corners = rectToCorners(target_rect);
+                target_corners = rectToCorners(target_rect);    // 取四角点
             }
         }
 
