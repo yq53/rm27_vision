@@ -166,6 +166,7 @@ public:
             object_points_ = plateObjectPoints();
             RCLCPP_INFO(get_logger(), "检测器: bbox %s", model_path.c_str());
         }
+        detector_label_ = pose_detector_ ? "pose" : "bbox"; // 与实际上走的通路一致，供画面标注
 
         // SourceConfig初始化
         rm_vision::SourceConfig cfg;
@@ -297,6 +298,17 @@ private:
             );
         }
 
+        // 画面上标注当前检测器模式：截图/录屏时可直接看出走的是 bbox 还是 pose 通路
+        cv::putText(
+            frame,
+            "detector: " + detector_label_,
+            cv::Point(60, 30),
+            cv::FONT_HERSHEY_SIMPLEX,
+            0.7,
+            cv::Scalar(0, 255, 255),
+            2
+        );
+
         std_msgs::msg::Header header;
         header.stamp = now();
         header.frame_id = "camera";
@@ -305,6 +317,7 @@ private:
 
     std::unique_ptr<ArmorDetector> detector_;          // bbox 检测器（默认）
     std::unique_ptr<ArmorPoseDetector> pose_detector_;  // 四关键点检测器（detector:=pose）
+    std::string detector_label_;                        // 当前检测器模式名（bbox/pose，画面标注用）
     std::vector<cv::Point3d> object_points_;            // 与所选检测器匹配的 3D 物体点
     std::unique_ptr<rm_vision::ImageSource> source_; // 图像源（video/hik 由工厂决定）
     ArmorEKF ekf_;

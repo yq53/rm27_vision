@@ -1,0 +1,12 @@
+=== eval tag=pose ===
+video=data/demo.avi  model=models/third_party/Infantry-v8n/Infantry-v8n-fp16-20260726-D1.8w-B16.onnx  fps=30.0000  detector=pose  corner_mode=bbox
+frames=687
+frames_with_armor=620  rate=90.2475%
+pnp_ok=604  rate=87.9185%
+refined_frames=620  rate=100.0000%(占检出)  bars_mean=NA(pose: 端点由模型直接给出, 不统计灯条数)
+reproj_px mean=1.1915  median=0.8181
+dist_raw mean=0.9641  dist_ekf mean=0.9462
+jitter_raw mean_abs=0.0322 std=0.0629 n=588
+jitter_ekf mean_abs=0.0219 std=0.0684 n=685
+yaw_deg mean_abs=13.2725
+time detect_ms=26.4555  pnp_ms=0.0700
