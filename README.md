@@ -2,46 +2,36 @@
 
 视觉方向三小题的完整实现：**装甲板识别（detector）→ 装甲板跟踪（tracker）→ 接入真实相机 + 可视化**。
 按题分目录组织，每部分可独立构建、运行、复现；学习过程、原理问答、踩坑与负结果的完整记录见
-`docs/notes.md`（知识记录 + 工作日志，21 章）。
+`docs/notes.md`（知识记录 + 工作日志，23 章）。
 
 - 代码：C++17 + OpenCV（题1 / 题2 为普通 CMake，题3 为 ROS2 Humble ament / colcon）
 - 素材：`data/demo.avi`（687 帧，自录，**只作测试集、永不进训练**）；模型全部随仓库提供
 - 评测：`eval_demo` 统一口径离线评测（逐帧 CSV + 汇总），本 README 里的指标数字都可复现
 
-## 快速开始（clone → 跑起来）
+## 快速开始（clone → 构建 → 看题3 的效果）
+
+题3「接入真实相机 + 可视化」是本项目的**核心效果**：图像源 → 检测 → PnP → EKF → 可视化；
+题1、题2 是这条链路上的两个环节，各自的用法与验证放在自己的小节里（「题1」/「题2」），这里不重复。
 
 ```bash
 # 1) 克隆（地址换成你自己的仓库）
 git clone https://github.com/your-name/rm27_vision.git
 cd rm27_vision
 
-# 2) 编译题1 / 题2（只需 OpenCV：不需要 GPU，也不需要 onnxruntime）
-cmake -S 01_detector -B build/01_detector -DCMAKE_BUILD_TYPE=Release && cmake --build build/01_detector -j
-cmake -S 02_tracker  -B build/02_tracker  -DCMAKE_BUILD_TYPE=Release && cmake --build build/02_tracker  -j
+# 2) 配置环境 + 构建（自动探测 ONNX Runtime / MVS SDK，并把 bbox 与 pose 两条通路都编好）
+bash scripts/setup.sh
 
-# 3) 看题1 的检测效果（约 15 s，产物 results/detector_demo.avi）
-./build/01_detector/armor_demo data/demo.avi models/armor_yolov8n.onnx 240
-```
-
-想直接看完整链路（ROS2 + rqt 可视化 + 终端里的状态数字）：
-
-```bash
-bash scripts/setup.sh                    # 只做两件事：配置环境 + 构建（不启动任何程序）
-
-# 启动入口只有 launch；两种检测器跑的都是同一段素材 data/demo.avi
+# 3) 起完整链路：视频源 data/demo.avi + bbox 检测器 + rqt 画面 + 终端状态数字
 source install/setup.bash
-ros2 launch rm_armor_visualization armor_tracker.launch.py use_rqt:=true print_state:=true    # ① bbox（默认）
-ros2 launch rm_armor_visualization armor_tracker.launch.py detector:=pose \
-    pose_model_path:=models/third_party/Infantry-v8n/Infantry-v8n-fp16-20260726-D1.8w-B16.onnx \
-    use_rqt:=true print_state:=true                                                           # ② 四关键点
+ros2 launch rm_armor_visualization armor_tracker.launch.py use_rqt:=true print_state:=true
 ```
 
 - **前置**：Ubuntu 22.04 · ROS2 Humble · OpenCV 4.x · C++17（详见「环境与依赖」）。
 - **仓库自带**测试素材 + 两个检测器模型，**不需要额外下载任何东西**；只有两个可选项要自己装：
   ONNX Runtime（四关键点检测器，`setup.sh` 会自动探测并启用）与海康 MVS SDK（真机相机 `source:=hik`）。
-- **脚本与启动的分工**：`scripts/setup.sh` 只负责"环境 + 构建"，**不启动任何程序**；
-  启动统一走 `ros2 launch`（唯一入口）。
-- 每一步该看到什么，见下面的「30 秒快速验证」——**每条命令都写了「预期效果」**。
+- **脚本与启动的分工**：`scripts/setup.sh` 只负责"环境 + 构建"，**不启动任何程序**；启动统一走 `ros2 launch`。
+- 只想验证题1 / 题2（纯 C++、不需要 ROS）：命令见「题1 → 快速验证」与「题2 → 快速验证」。
+- 两种检测器 × 两种素材的 4 条命令与预期效果，见下面「快速验证（题3）」。
 
 ## 考核要求对照
 
@@ -55,51 +45,65 @@ ros2 launch rm_armor_visualization armor_tracker.launch.py detector:=pose \
 > 三题通过同一套「2D 点 → PnP → EKF」主链路串起来：题1 决定 2D 点从哪来，题2 决定怎么解与怎么平滑，
 > 题3 决定数据从哪来、结果给谁看。这也是本工程的组织方式——**一题一目录，但共享同一份核心库**。
 
-## 30 秒快速验证（复制即用）
+## 快速验证（题3：两种素材 × 两种检测器）
 
-前置：先按下面「构建 A」编好题1/题2（只需 OpenCV）。**以下命令都在仓库根目录执行，用的全是仓库自带素材，无需额外下载。**
-
-```bash
-# 题1：检测器 —— 跑 240 帧并生成标注视频（约 15 s）
-./build/01_detector/armor_demo data/demo.avi models/armor_yolov8n.onnx 240
-# 预期效果：终端末尾打印
-#   [SUMMARY] processed frames : 240 / frames w/ armor : 152 (63.3%) / total detections : 179
-#   并生成 results/detector_demo.avi —— 用播放器打开，画面里的装甲板被绿框套住
-
-# 题2 之一：PnP 闭环自检 —— A 段是合成数据，解算误差应该≈0（约 6 s）
-./build/02_tracker/pnp_demo data/demo.avi models/armor_yolov8n.onnx 120
-# 预期效果：A 段打印 dist=3.015 m (true=3.015) | yaw=14.3 (true=14.3) | reproj 0.0/0.0 px
-#   （解出来的值和真值逐位相同 → 说明 PnP 没写错）；
-#   B 段打印真实视频的 solved 帧数与平均距离（约 0.6 m 量级）
-
-# 题2 之二：平滑效果 —— 生成对比视频，终端打印原始 vs EKF 的距离跳动
-./build/02_tracker/tracker_demo data/demo.avi models/armor_yolov8n.onnx 300
-# 预期效果：终端打印 "跳动 raw … vs EKF …"，EKF 明显更小（300 帧时约 0.042 → 0.020 m）；
-#   生成 results/tracker_demo.avi（绿字=原始 PnP、黄字=EKF，黄字应当更稳）
-```
+下面 4 条命令覆盖 **demo 视频 / 海康相机流 × bbox / pose**，都在**仓库根目录**执行。
+前置：先跑一次 `bash scripts/setup.sh`，然后
 
 ```bash
-# 题3：ROS2 全链路 + rqt 可视化窗口（前置：已跑过 scripts/setup.sh，它会配好环境并构建）
 source /opt/ros/humble/setup.bash && source install/setup.bash
-ros2 launch rm_armor_visualization armor_tracker.launch.py use_rqt:=true print_state:=true
-# 预期效果：终端出现两种 INFO ——
-#   主节点："检测器: bbox models/armor_yolov8n.onnx" 与 "publishing /armor/annotated & /armor/state"
-#   打印机（每秒一行）："d=0.52 m  pos=(0.07, -0.05, 0.51)  v=(0.00, 0.00, 0.00)"
-#   rqt 窗口自动弹出并播放 data/demo.avi，装甲板被绿框套住，左上角有两行黄字：
-#   第一行 detector: bbox，第二行 d=…m v=(…)
-#   （不想开 rqt 就把 use_rqt 去掉；不需要终端数字就把 print_state 去掉）
+POSE_MODEL=models/third_party/Infantry-v8n/Infantry-v8n-fp16-20260726-D1.8w-B16.onnx
 ```
+
+### A. demo 视频（`data/demo.avi`，仓库自带）
 
 ```bash
-# 可选：同样素材换成四关键点检测器（需构建时启用了 ONNX Runtime，setup.sh 会自动探测）
-POSE_MODEL=models/third_party/Infantry-v8n/Infantry-v8n-fp16-20260726-D1.8w-B16.onnx
-ros2 launch rm_armor_visualization armor_tracker.launch.py detector:=pose pose_model_path:="$POSE_MODEL" use_rqt:=true
-# 预期效果：终端打印 "检测器: pose（四关键点）…"；
-#   画面左上角第一行变成 detector: pose；且绿框通常会同时套住同一块板的**两根**灯条
-#   （bbox 模式常常只套住其中一根 —— 这正是 2D 点质量差异的直观体现）
+# ① 视频 + bbox 检测器（默认）
+ros2 launch rm_armor_visualization armor_tracker.launch.py use_rqt:=true print_state:=true
+
+# ② 视频 + 四关键点检测器
+ros2 launch rm_armor_visualization armor_tracker.launch.py \
+    detector:=pose pose_model_path:="$POSE_MODEL" use_rqt:=true print_state:=true
 ```
 
-以上命令均于 2026-09-11 在本仓库实测通过。**每条都给了「预期效果」，对不上就说明有问题**，先对照文末「FAQ」排查。
+**预期效果**（两条一样，只有检测器不同）
+
+- **终端**：先出现 `[armor_tracker.launch] 图像源 = video (本地文件)`、主节点的
+  `检测器: bbox models/armor_yolov8n.onnx`（或 `检测器: pose（四关键点）…`）与
+  `publishing /armor/annotated & /armor/state`；随后 `armor_state_printer` 每秒一行
+  `d=0.52 m  pos=(0.07, -0.05, 0.51)  v=(0.00, 0.00, 0.00)`。
+- **rqt 窗口**：自动弹出并循环播放 `data/demo.avi`，装甲板被绿框套住；左上角两行黄字——
+  第一行 `detector: bbox` 或 `detector: pose`，第二行 `d=…m v=(…)`。
+- **一眼分辨两种检测器**：`pose` 的绿框由 4 个灯条端点推出，通常会**同时套住同一块板的两根灯条**；
+  `bbox` 沿用检测框，常常只套住其中一根。
+- 只想要画面、不要终端数字：去掉 `print_state:=true`；不要 rqt：去掉 `use_rqt:=true`。
+- 对不上时先查两件事：有没有 `source install/setup.bash`；`detector:=pose` 的构建是否启用了 ONNX Runtime（见 FAQ）。
+
+### B. 海康相机流（`source:=hik`）
+
+```bash
+# ① 填序列号（现场只需改这一处，代码不用动）
+nano data/camera.yaml            # 把 serial_number 改成相机上的实际序列号
+
+# ② 海康 + bbox
+ros2 launch rm_armor_visualization armor_tracker.launch.py source:=hik use_rqt:=true print_state:=true
+
+# ③ 海康 + 四关键点
+ros2 launch rm_armor_visualization armor_tracker.launch.py source:=hik \
+    detector:=pose pose_model_path:="$POSE_MODEL" use_rqt:=true print_state:=true
+```
+
+**预期效果**
+
+- **接上真机**：与 A 完全一样，只是画面来自相机实时流。构建需启用 MVS SDK——
+  `setup.sh` 检测到 `/opt/MVS` 会自动打开 `USE_HIK_SDK`（收尾会打印开关状态）。
+- **没接相机**（本仓库开发机就是这种情况，如实说明）：节点打印
+  `[hik_source] 未发现相机（检查网线/USB 与相机电源）` 后退出 255，**而 `ros2 launch` 自身仍返回 0**——
+  成败要看节点日志。能走到这条日志，说明 SDK 链路、构建、参数传递都是通的。
+- 完整踩坑与验证边界见「04_hik」小节。
+
+> 上面 4 条中，A 的两条已于 2026-09-11 在本仓库实测通过；B 的两条因本机没有相机，
+> 只验证到"枚举不到设备并明确报错"这一步。
 
 ## 目录结构
 
@@ -131,7 +135,7 @@ rm27_vision/
 ├── scripts/setup.sh           # 一键配置环境 + 构建（不启动任何程序；启动统一交给 launch，见题3）
 ├── rm_interfaces/             # 自定义消息接口包（ArmorState.msg）
 ├── docs/
-│   ├── notes.md               # 学习笔记（21 章：原理问答 + 踩坑 + 负结果 + 工作记录）
+│   ├── notes.md               # 学习笔记（23 章：原理问答 + 踩坑 + 负结果 + 工作记录）
 │   └── screenshots/           # 运行效果截图（题1 预览 + 题3 真实相机证据）
 └── results/                   # 运行输出（生成物不入库；唯一入库的证据录屏 real_camera_2026-09-09.mkv）
 ```
@@ -546,21 +550,21 @@ ORT_DIR=/your/onnxruntime bash scripts/setup.sh    # 手工指定 ORT 位置
 
 ### 快速验证
 
+> **4 条启动命令（demo 视频 / 海康相机流 × bbox / pose）与各自的预期效果已在文件顶部
+> 「快速验证（题3：两种素材 × 两种检测器）」**，这里只补充**不开 rqt 的单终端自检**方式。
+
 ```bash
 REPO=$HOME/my_project/ws_exam/rm27_vision     # ← 换成你 clone 下来的绝对路径
 cd "$REPO"
 source /opt/ros/humble/setup.bash && source install/setup.bash
 
-# ① 一键启动：视频源 + 主节点 + rqt 看图窗口
-ros2 launch rm_armor_visualization armor_tracker.launch.py use_rqt:=true
-
-# ② 无 GUI 的单终端自检：后台起节点 → 取一条状态 → 自动结束
+# 后台起节点 → 取一条状态 → 自动结束（无需 GUI）
 timeout 25 ros2 run rm_armor_visualization armor_tracker_node --ros-args -p video_path:=data/demo.avi &
 sleep 4
-timeout 25 ros2 topic echo /armor/state --once     # 应打印 frame_id: camera + position/velocity/distance
+timeout 25 ros2 topic echo /armor/state --once
 ```
 
-②输出的形如：
+输出形如：
 
 ```yaml
 header: {stamp: {…}, frame_id: camera}
@@ -569,18 +573,13 @@ velocity:  {x: -1.729, y: -0.848, z: 1.672}
 distance:  1.5159
 ```
 
-**预期效果**
+**预期效果**：`ros2 topic echo --once` 打印**一条** YAML —— `frame_id` 必须是 `camera`，
+`position` / `velocity` / `distance` 三个字段都有数值，`distance` 在 0.3~2 m 量级
+（示例是 1.5 m；`data/demo.avi` 是近距离素材，数值随帧变化）。
 
-- ①（launch）：终端先打印 `[armor_tracker.launch] 图像源 = video (本地文件)`，随后节点打印
-  `检测器: bbox models/armor_yolov8n.onnx` 与 `publishing /armor/annotated & /armor/state`；
-  rqt 窗口弹出并播放 `data/demo.avi`，装甲板被绿框套住，左上角两行黄字
-  （第一行 `detector: bbox`、第二行 `d=…m v=(…)`）。
-- ②（自检）：`ros2 topic echo --once` 打印**一条** YAML，`frame_id` 必须是 `camera`，
-  `position` / `velocity` / `distance` 三个字段都有数值，`distance` 在 0.3~2 m 量级
-  （示例是 1.5 m；`data/demo.avi` 是近距离素材，数值随帧变化）。
-- **常见异常**：一直空白等不到消息 → 多半是 RMW 不一致或 `~/.ros` 不可写（见 FAQ）；
-  `distance` 是 0 或 NaN → 该帧 PnP 没出解，等几帧即可（漏检是正常的）；
-  节点一起来就退出 → 看它打印的第一条 ERROR（路径/模型/相机问题都会在这里明说）。
+**常见异常**：一直空白等不到消息 → 多半是 RMW 不一致或 `~/.ros` 不可写（见 FAQ）；
+`distance` 是 0 或 NaN → 该帧 PnP 没出解，等几帧即可（漏检是正常的）；
+节点一起来就退出 → 看它打印的第一条 ERROR（路径/模型/相机问题都会在那里明说）。
 
 ### 手动分终端（完整链路）
 
@@ -731,7 +730,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | ② 角点精修负结果 | —（调试图生成物） | `RM_CORNER_DEBUG=1 ./build/02_tracker/eval_demo data/demo.avi models/armor_yolov8n.onnx 200 t_refine refine bbox` → `results/corner_dbg_*.png` |
 | 题3 真实相机验证 | `results/real_camera_2026-09-09.mkv`、`docs/screenshots/phone_rqt.png` | `source:=ip` + 手机横屏 |
 | pose 模式的可视化 | `docs/screenshots/pose_rqt.png` | `ros2 launch rm_armor_visualization armor_tracker.launch.py detector:=pose pose_model_path:="$POSE_MODEL" use_rqt:=true` |
-| 原理与踩坑全过程 | `docs/notes.md` | 按目录读；§20（四关键点与评测）、§21（负结果全录 + 考核对照）是本轮核心 |
+| 原理与踩坑全过程 | `docs/notes.md`（23 章） | 按目录读；§20（四关键点与评测）、§21（负结果全录 + 交付对照）、§22（与 README 的双向对照）是本轮核心 |
 
 ## FAQ
 
@@ -791,3 +790,4 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | **v3.2** | 2026-09-11 | 文档：全量命令实测校验后重写操作部分——新增「30 秒快速验证」「命令行通用约定」「文件清单：核心/工具/教学」；每题补齐「一般用法 → 快速验证 → 产物」；在源文件头加角色标签。修正 5 处与实测不符的说法（hik 的 `LD_LIBRARY_PATH` 非必需、`RM_CORNER_DEBUG` 传任意值即生效、`RMW` 只在跨 RMW 传大图时才是瓶颈、题面"仿真、真实相机"是并列而非二选一、② 的调试图是 `corner_dbg_*`）；补 `source:=hik` 时 `ros2 launch` 返回 0 但节点已死的提醒、海康通路的验证边界、pose 模式运行截图 |
 | **v3.3** | 2026-09-11 | 体验优化：新增「快速开始（clone → 跑起来）」；新增 `scripts/demo.sh` 一键启动脚本（手工版照旧保留）；新增可选节点 `armor_state_printer` + launch 参数 `print_state`（单终端即可看到状态数字）；主节点在画面上叠加当前检测器模式（`detector: bbox/pose`，便于截图自证）；把两份评测汇总加入 `.gitignore` 白名单随仓库提交；每处验证步骤补「预期效果」（含常见异常判据）；`docs/notes.md` 同步重编目录（两级索引 + 状态标签）并新增 §22「与 README 的双向对照」 |
 | **v3.4** | 2026-09-11 | 职责收窄：`scripts/demo.sh`（会启动程序）改为 **`scripts/setup.sh`（只配置环境 + 构建，不启动任何程序）**，启动入口统一收敛到 `ros2 launch`；`setup.sh` 会自动探测 ONNX Runtime / MVS SDK 并把 bbox 与 pose 两条通路都编好，收尾打印两条素材 demo.avi 的启动命令；更换带 `detector: pose` 标签的 rqt 截图 |
+| **v3.5** | 2026-09-11 | 突出核心：顶部「快速开始」只引导到题3（clone → `scripts/setup.sh` → `ros2 launch`）；原「30 秒快速验证」改为 **「快速验证（题3：两种素材 × 两种检测器）」**，只保留题3 的 4 条命令（demo 视频 / 海康相机流 × bbox / pose）与各自预期效果，题1、题2 的验证命令回归各自小节 |
