@@ -1,3 +1,4 @@
+// [教学] L7：PnP → EKF 平滑对比演示（原始 vs 滤波）—— 删除不影响主节点
 #include <algorithm>
 #include <chrono>
 #include <cmath>

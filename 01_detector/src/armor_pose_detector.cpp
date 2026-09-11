@@ -1,3 +1,4 @@
+// [核心] 题1：四关键点检测器库实现（可选 ONNX Runtime 后端）—— 主节点依赖，删除则无法启动
 #include "armor_pose_detector/armor_pose_detector.hpp"
 
 #include <algorithm>

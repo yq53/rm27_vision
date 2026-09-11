@@ -84,6 +84,20 @@ rm27_vision/
 └── results/                   # 运行输出（生成物不入库；唯一入库的证据录屏 real_camera_2026-09-09.mkv）
 ```
 
+## 文件清单：核心 / 工具 / 教学
+
+判据只有一条——**"把它删掉，还能不能 `ros2 launch` 起主节点、并在 rqt 里看到检测结果？"**
+每个源文件的头部也写了同样的标签（`// [核心]` / `// [工具]` / `// [教学]` / `// [负结果]`），直接打开文件也能看到。
+
+| 类别 | 文件 | 删掉的后果 |
+|---|---|---|
+| **核心**（运行时必需） | `01_detector/src/armor_detector.cpp`、`armor_pose_detector.cpp`；`02_tracker/src/armor_pnp.cpp`、`armor_ekf.cpp`；`03_visualization/src/armor_tracker_node.cpp`、`image_source.hpp` / `.cpp`；`rm_interfaces/msg/ArmorState.msg`；`models/armor_yolov8n.onnx` | 主节点起不来，或少一条检测器/解算通路 |
+| **工具**（非运行时，但决定"指标能不能复现"） | `02_tracker/src/eval_demo.cpp`、`02_tracker/scripts/compare_eval.py`、`01_detector/scripts/convert_fp16_to_fp32.py` | 主节点照常，但 687 帧 A/B 表无法复现 |
+| **教学 / 演示**（学习过程留档） | `01_detector/src/demo_main.cpp`；`02_tracker/src/{projection,corner,pnp,tracker,lightbar}_demo.cpp`；`03_visualization/src/armor_video_node.cpp`；`04_hik/src/*.cpp` | 无影响 |
+| **负结果存档** | `02_tracker/src/armor_corner.cpp`、`light_bar_detector.cpp` | 无影响（只被 `eval_demo` 的两个可选模式引用；证据见 notes §15、§21.1） |
+
+> 建议阅读顺序：先看「核心」的四个库 + 一个节点，再按需看「工具」（评测口径）与「教学」（推导过程）。
+
 ## 环境与依赖
 
 **必备**
@@ -501,6 +515,10 @@ ros2 run rm_armor_visualization armor_tracker_node --ros-args \
 切换只影响"2D 点从哪来"：节点内部两条路都归到同一组变量（`target_rect` / `target_corners` / `has_target`），
 之后的 PnP → EKF → 发布**完全共用**。
 
+pose 模式下的 rqt 实时标注（绿框由 4 个灯条端点推出，左上角叠加距离与速度）：
+
+![pose 模式 rqt 实时标注](docs/screenshots/pose_rqt.png)
+
 ### 真实相机
 
 ```bash
@@ -572,6 +590,11 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 - 主节点用的是封装后的版本（`image_source.cpp` 的 `#ifdef RM_USE_HIK_SDK` 段 + `data/camera.yaml`）：
   **现场展示只需改 `data/camera.yaml` 里的 `serial_number`，代码不用动**。踩坑记录见 notes §19。
 
+> **验证边界（如实说明）**：本工程开发机上**没有海康相机**，所以这条通路验证到
+> 「枚举到 0 台设备并优雅提示、退出码 0」为止；`StartGrabbing` → `GetImageBuffer` → `cv::Mat`
+> 这段取流与像素格式转换（含 MVS 5.0.2 的 `pBufAddr` 踩坑修正）已按 SDK 头文件实现，
+> **需在接上真机后确认**。它本来就是按"现场会接海康相机"准备的：届时填上序列号即可切流。
+
 ---
 
 ## 证据与复现索引
@@ -587,6 +610,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | 题2 平滑效果 | —（生成物） | `./build/02_tracker/tracker_demo data/demo.avi models/armor_yolov8n.onnx 300` → `results/tracker_demo.avi` |
 | ② 角点精修负结果 | —（调试图生成物） | `RM_CORNER_DEBUG=1 ./build/02_tracker/eval_demo data/demo.avi models/armor_yolov8n.onnx 200 t_refine refine bbox` → `results/corner_dbg_*.png` |
 | 题3 真实相机验证 | `results/real_camera_2026-09-09.mkv`、`docs/screenshots/phone_rqt.png` | `source:=ip` + 手机横屏 |
+| pose 模式的可视化 | `docs/screenshots/pose_rqt.png` | `ros2 launch rm_armor_visualization armor_tracker.launch.py detector:=pose pose_model_path:="$POSE_MODEL" use_rqt:=true` |
 | 原理与踩坑全过程 | `docs/notes.md` | 按目录读；§20（四关键点与评测）、§21（负结果全录 + 考核对照）是本轮核心 |
 
 ## FAQ
@@ -633,10 +657,13 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 
 ## 修订记录
 
+> **版本号约定**：只有在**功能或效果有实质变化**时才进位大版本（v1 → v2 → v3）；
+> 纯文档结构、表述与使用体验的优化只递进次版本（v3.1、v3.2 …），不改动任何算法与接口。
+
 | 版本 | 日期 | 说明 |
 |---|---|---|
 | v1.0 | 2026-09-08 | 三题初稿运行说明 + 证据截图 |
 | v2.0 | 2026-09-09 | 复盘后重构：三题并列结构、状态总览表、补题2 运行/指标、FAQ、参考资料对照；修复录屏死链 |
-| v3.0 | 2026-09-11 | 按考核题面重写全文：补「考核要求对照」；新增题2 评测基础设施（口径 + 687 帧 A/B 表）与两条 v2 负结果；题1 补四关键点检测器；题3 补检测器选择与真实相机；新增 04_hik 说明、证据索引、许可说明 |
-| v3.1 | 2026-09-11 | 四关键点权重入库（`models/third_party/` + `SOURCE.md`）；「许可说明」改为按内容分层 |
-| **v4.0** | 2026-09-11 | **全量命令实测校验**后重写操作部分：新增「30 秒快速验证」与「命令行通用约定」（参数默认值 / `atoi` 静默陷阱 / 无 usage 文本）；每题补齐「一般用法 → 快速验证 → 产物」三段；修正 5 处与实测不符的说法（hik 的 `LD_LIBRARY_PATH` 非必需、`RM_CORNER_DEBUG` 传任意值即生效、`RMW` 仅在跨 RMW 时才是瓶颈、题面"仿真、真实相机"是并列而非二选一、② 的调试图是 `corner_dbg_*`）；补 `source:=hik` 时 launch 返回 0 但节点已死的提醒 |
+| v3.0 | 2026-09-11 | 按考核题面重写全文（功能层面：① 评测基础设施 + ② 角点精修负结果 + ③ 四关键点检测器）：补「考核要求对照」；新增题2 评测口径与 687 帧 A/B 表、两条 v2 负结果；题1 补四关键点检测器；题3 补检测器选择与真实相机；新增 04_hik 说明、证据索引、许可说明 |
+| v3.1 | 2026-09-11 | 文档：四关键点权重入库（`models/third_party/` + `SOURCE.md`）；「许可说明」改为按内容分层 |
+| **v3.2** | 2026-09-11 | 文档：全量命令实测校验后重写操作部分——新增「30 秒快速验证」「命令行通用约定」「文件清单：核心/工具/教学」；每题补齐「一般用法 → 快速验证 → 产物」；在源文件头加角色标签。修正 5 处与实测不符的说法（hik 的 `LD_LIBRARY_PATH` 非必需、`RM_CORNER_DEBUG` 传任意值即生效、`RMW` 只在跨 RMW 传大图时才是瓶颈、题面"仿真、真实相机"是并列而非二选一、② 的调试图是 `corner_dbg_*`）；补 `source:=hik` 时 `ros2 launch` 返回 0 但节点已死的提醒、海康通路的验证边界、pose 模式运行截图 |

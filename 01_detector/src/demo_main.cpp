@@ -1,3 +1,4 @@
+// [教学] 题1 演示程序：读视频 → 检测 → 画框 → 存结果视频 —— 删除不影响主节点
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>

@@ -1,3 +1,4 @@
+// [核心] 题1：bbox 检测器库实现（自训 YOLOv8n + cv2.dnn）—— 主节点依赖，删除则无法启动
 #include "armor_detector/armor_detector.hpp"
 
 #include <algorithm>

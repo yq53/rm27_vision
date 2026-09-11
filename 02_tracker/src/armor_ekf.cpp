@@ -1,3 +1,4 @@
+// [核心] 常速卡尔曼滤波（6D 状态：位置 + 速度）—— 主节点依赖，删除则无法启动
 #include "armor_ekf/armor_ekf.hpp"
 
 namespace rm_tracker {

@@ -1,3 +1,4 @@
+// [负结果] v2 灯条精定位原型（demo.avi 配对率仅 7%，已冻结）—— 仅 lightbar_demo 引用
 #include "armor_tracker/light_bar_detector.hpp"
 
 #include <algorithm>

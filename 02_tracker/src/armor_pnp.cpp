@@ -1,3 +1,4 @@
+// [核心] PnP 位姿解算（IPPE 多解 + 破镜像 + 双重闸门）—— 主节点与 eval_demo 共用同一套逻辑，删除则无法启动
 #include "armor_pnp/armor_pnp.hpp"
 
 #include <cmath>

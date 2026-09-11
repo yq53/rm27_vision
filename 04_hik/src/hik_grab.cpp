@@ -1,3 +1,4 @@
+// [教学] 海康 MVS SDK 学习 demo · C 步：取流并转 OpenCV BGR
 // hik_grab：取流并转成 OpenCV BGR 图（C 步）
 //
 // 用法：hik_grab [序列号] [取帧数]

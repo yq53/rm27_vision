@@ -1,3 +1,4 @@
+// [教学] L4：PnP 闭环验证（A 段合成数据 + B 段真实数据）—— 删除不影响主节点
 #include <algorithm>
 #include <chrono>
 #include <cmath>

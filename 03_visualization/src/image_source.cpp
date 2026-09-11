@@ -1,3 +1,4 @@
+// [核心] 图像源抽象实现与工厂（video / ip / hik；hik 段由 RM_USE_HIK_SDK 开关控制）
 // image_source.cpp：图像源实现与工厂（D 步接口版）
 //
 // 结构：

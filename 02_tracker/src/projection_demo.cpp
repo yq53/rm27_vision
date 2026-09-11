@@ -1,3 +1,4 @@
+// [教学] L2：3D → 2D 正投影演示（不解析命令行参数）—— 删除不影响主节点
 #include <cmath>
 #include <cstdio>
 #include <filesystem>

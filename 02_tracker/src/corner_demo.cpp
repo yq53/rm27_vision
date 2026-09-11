@@ -1,3 +1,4 @@
+// [教学] L3：YOLO 框 → 四角点演示 —— 删除不影响主节点
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>

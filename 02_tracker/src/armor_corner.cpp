@@ -1,3 +1,4 @@
+// [负结果] v2 角点精修原型（本素材实测失效：大偏航常只见单根灯条）—— 仅 eval_demo 的 refine 模式引用
 #include "armor_corner/armor_corner.hpp"
 
 #include <algorithm>

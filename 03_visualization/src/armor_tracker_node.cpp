@@ -1,3 +1,4 @@
+// [核心] 题3 主节点：图像源 → 检测 → PnP → EKF → 发布标注图与状态（交付主链路）
 #include <algorithm>
 #include <iostream>
 #include <limits>

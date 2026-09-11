@@ -1,3 +1,4 @@
+// [工具] 离线评测主程序（输出逐帧 CSV + 汇总）—— 非运行时依赖，但本仓库所有指标数字都由它产生
 // eval_demo：离线评测当前链路（detector -> 角点 -> PnP -> EKF）
 //
 // 用法：eval_demo [视频] [模型] [最大帧数(0=全部)] [tag] [corner_mode: bbox|refine] [detector: bbox|pose]

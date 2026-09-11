@@ -1,3 +1,4 @@
+// [教学] L8：灯条精定位演示（负结果的演示部分）—— 删除不影响主节点
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>

@@ -1,3 +1,4 @@
+// [教学] P0 示例节点：仅 detector → 标注图，保留作对比学习 —— 删除不影响主节点
 #include <iostream>
 #include <memory>
 
