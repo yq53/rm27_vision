@@ -19,6 +19,7 @@
 17. 题3 ROS2 接入与可视化（P0/P1 + 真实相机验证完成）
 18. 复盘与修订记录（2026-09-09）
 19. Hik MVS SDK 接入（04_hik）
+20. 四关键点模型接入与评测体系（2026-09-10）
 
 ---
 
@@ -1096,3 +1097,68 @@ v2：框内**灯条精定位**（灯条端点 → 更准的四角点 → PnP 更
 - **环境变量自动化**：launch 内 `SetEnvironmentVariable` 设 `RMW_IMPLEMENTATION`；`source:=hik` 时额外把 `/opt/MVS/lib/64` 前置到 `LD_LIBRARY_PATH`——**仅进程级，不写 ~/.bashrc**。
 - **参数校验**：`source` 非三值之一 → 抛错并列出可选值；`source:=ip` 未给 `ip_url` → 抛错并给示例。
 - **实测（本机）**：A 默认 video 仓库根目录 ✅；B 从 `~` + `repo_root` 绝对路径 ✅；C `source:=ip` 缺 url → 明确报错 ✅；D `source:=hik` 无相机 → hik 报错链正常 ✅（D 能打印"未发现相机"即证明 launch 自动设置的 LD_LIBRARY_PATH 生效，否则 MVS 库都加载不了）。rqt 面板（`use_rqt:=true`）已在桌面会话实测通过：窗口正常弹出并显示 `/armor/annotated` 标注图（2026-09-10 用户验证 ✅）。
+
+## 20. 四关键点模型接入与评测体系（2026-09-10）
+
+### 20.1 为什么做这条线
+
+- **角点质量是 PnP 精度的上限**：v1 用 bbox 四角近似板角，板一旋转误差就放大（"摄像头歪着检测就离谱"的根因之一）；
+- ② 传统双灯条精修在本素材失效：大偏航常只可见**单根灯条**（`bars_mean≈0.92`），精修仅 0.4% 帧生效 → 转向社区主流方案：**网络直出四关键点**；
+- 选型：深大 RobotPilots `Infantry-v8n`（YOLOv8n-Pose 重设计检测头，输入 480×640，输出 21×6300）。许可注意：仓库标称 MIT，但 **ONNX 元数据写 AGPL-3.0（Ultralytics）** → 权重不入库。
+
+### 20.2 关键语义（实验定死，改模型必须重新验证）
+
+- 输出布局：`row4..12` = 9 个类别分数；`row13..20` = 4 个关键点 (x,y)；**无逐点置信度**；框由 `boundingRect(4 点)` 推出（官方后处理同做法）；
+- **4 个点是两根灯条的端点，不是板四角**（实测四边形长宽比 ≈2.2:1，与 135:56 吻合）；
+- PnP 物体模型必须用 `barEndObjectPoints`（135×56mm），索引映射 `kp0/kp3/kp2/kp1 → TL/TR/BR/BL`；
+- 证据（重投影误差）：**135×56 + 正确绕向 = 1.09 px**；板模型 135×125 = 8.09 px；135×56 反向绕向 = 25.64 px；
+- 灯条长度扫描：50/52/54/56/58/60mm → 1.03/0.84/0.86/1.09/1.39/1.69 px，最优 ≈**52mm**（标称 56mm；差异吸收"内参未标定"误差）。
+
+### 20.3 推理后端与踩坑
+
+- **结论：本模型实质要求 `USE_ONNXRUNTIME=ON`**，且必须用**原始导出件**——`convert_fp16_to_fp32.py` 的产物只供 cv2.dnn，ORT 用它反而报 float16/float32 类型不匹配；
+- cv2.dnn 走不通，但**卡点与 OpenCV 版本相关，不是绝对不可用**（本轮查清）：
+  - **C++ OpenCV 4.13 + 原始导出件**：ONNX importer 报 `unknown input 'graph_input_cast_0' of node '/model.0/conv/Conv'`——入口 Cast 节点未被建模；
+  - **C++ OpenCV 4.13 + fp32 转换件**：Cast 问题消失，改为 decode 段 `NaryEltwise` 广播断言失败（`shape[i] == 1 || outShape[i] == 1`）；
+  - **python cv2 5.0.0 + fp32 转换件**：加载与 `forward()` **均通过**，输出 `(1,21,6300) float32`——即 5.0 的 dnn 支持该算子形态，4.x 不支持；
+- 该模型**对外声明的张量类型是 fp32**（`images` 与 `output0` 的 `elem_type` 均为 FLOAT），fp16 只在图内部：入口 `graph_input_cast0` 转 fp16 计算、出口 `graph_output_cast0` 转回 fp32。故 C++ 侧 `CreateTensor<float>` / `GetTensorData<float>()` 正确；代价是每次推理多一次入口 fp32→fp16 转换（约 1.76MiB 临时缓冲）；
+- 早期记录"两后端实测检出 20/20 一致、角点最大差 0.25px（类别 argmax 有 3/20 抖动）"是 **python 侧**对比（cv2 5.0.0 跑 fp32 件 vs onnxruntime），与 C++ 侧 4.13 跑不通**不矛盾**——版本不同，当时未意识到这一点；
+- 无 ORT 构建的处理（本轮定稿）：保留 `#else` 分支与 `RM_USE_ONNXRUNTIME` 宏（默认构建必须零依赖可过：`armor_pose_detector` 无条件编译、且被 `armor_tracker_node` / `eval_demo` 无条件链接），但**不再尝试 cv2.dnn 加载**——构造函数直接抛异常并附可执行的修复指引，`detect()` 的非 ORT 分支返回空（构造必然失败，不可达）。理由：既然该后端对本模型已知必败，就不该用能编译的代码保留一条已被否证的假设；
+- 行为变化：此前无 ORT 构建下若喂**转好的 fp32** 件，构造能成功、要到 forward 才崩；现在构造即报错。
+
+### 20.4 评测口径（eval_demo）
+
+- 用法：`eval_demo <video> <model> <max_frames> <tag> <corner_mode:bbox|refine> <detector:bbox|pose>`；
+- 产物：`results/eval_<tag>.csv`（逐帧）+ `results/eval_<tag>_summary.txt`（汇总）；`compare_eval.py <tagA> <tagB>` 出对比表；
+- 指标：`frames_with_armor`（检出率）、`pnp_ok`（PnP 通过率）、`reproj_px`（角点质量）、`dist_raw/dist_ekf + jitter`（稳定性）、`detect_ms/pnp_ms`（性能）；
+- **jitter 定义**：相邻**有效且帧号相邻**的差分均值 `|d_i − d_{i−1}|`；NaN 由 `continue` 跳过（不更新 last），`last_idx>=0` 防首帧假跳变，`i==last_idx+1` 防跨空档假跳变；样本数 `n` 一并输出；
+- **NaN = "本帧无有效值"**（与真实的 0 区分；CSV 写空字段）；`numeric_limits::max()` 作**比较哨兵**（armor_pnp 求最小重投影误差），`quiet_NaN()` 作**缺失标记**（eval_demo）——二者不可混用（NaN 任何比较都为 false）；
+- `bars_mean` 只在 `bbox+refine` 有意义（其余输出 NA）；`n_armor` = 本帧**装甲板块数**（两种检测器语义一致）。
+
+### 20.5 实测（demo.avi 687 帧，同一 EKF、同一口径）
+
+| 指标 | bbox 基线 | pose 关键点 | Δ |
+|---|---|---|---|
+| 检出帧 | 498 (72.49%) | 620 (90.25%) | +17.76 pt |
+| PnP 通过 | 415 (60.41%) | 604 (87.92%) | +27.51 pt |
+| 重投影 | 4.11 px | 1.19 px | −2.92 |
+| jitter_raw | 0.0853 m | 0.0322 m | −62% |
+| jitter_ekf | 0.0555 m | 0.0219 m | −60% |
+| detect 耗时 | 37.96 ms | 26.81 ms | −11.1 ms |
+
+### 20.6 读码概念沉淀（本轮澄清）
+
+- **2D 图像点 vs 3D 物体模型**：PnP 靠"2D↔3D 配对"求位姿；两种检测器只是"2D 点来源"不同（bbox=框四角/几何推导；pose=模型预测的关键点）；
+- pose 模式下 `boundingRect(kpts)` 只用于**画框**与**挑面积最大目标**，不参与 PnP（方向是"关键点→框"，不是"框→角点"）；
+- `target_count` = 本帧**装甲板块数**（687 帧分布 0/1/2/3，可排除"每根灯条算一个目标"）；
+- C++ 细节：`assign` = **重置+填充**（不是追加）；`vector::erase` + `std::remove_if` = erase-remove 惯用法（remove_if 只搬移并返回新末尾，不改 size）；`std::accumulate` 求和（`init` 类型决定运算类型，必须写 `0.0`）；`ostringstream` = **内存流**（拼一次文本，写屏幕 + 写文件）；`numeric_limits` 各值语义（max/lowest/min/epsilon/infinity/quiet_NaN）；lambda 作谓词。
+- **ORT 张量所有权不对称**：输入 `CreateTensor` 只**引用**我们的 `blob`（blob 必须活过 `Run`）；输出 `Ort::Value` **持有** ORT 分配的张量（`outputs` 析构即失效 → `decode()` 必须与 `Run` 同作用域调用）；
+- `Ort::MemoryInfo` = "这块内存住在哪"的身份证（分配器类型 + 用途类型），本身不含数据；`CreateCpu` 造的是"CPU、默认用途"的描述，**不触发任何分配**；
+- `Session::Run` = **按名字点单**：输入名/输出名都要显式给出（名字取自模型的 `GetInputNameAllocated` / `GetOutputNameAllocated`，不能假定叫 `images`），返回 `std::vector<Ort::Value>` 与 `output_names` **顺序一一对应**；`Session` 对输入**无状态** → 同一 Session 可并发 `Run`（cv2.dnn 的 `Net` 有状态，做不到）；
+- `CreateTensor<T>` 的 `T` 有两个作用：把**元素个数**换算成字节数、自动推出 `ONNXTensorElementDataType`；第 3 个参数是**元素个数**而非字节数（误传 `total()*sizeof(T)` 会越界读，且 ORT 不报错）；
+- `decode()` 开头 `num_features < kFirstKpt + 2*kNumKpts`（= 21）是**防越界读**的闸门：误喂非 pose 输出（如 bbox 模型的 `[1,5,8400]`）时安全返回空，否则按 `feature*num_boxes+box` 越界读约 262KB；它只防"行数不够"，防不了"行数够但布局不同"。
+
+### 20.7 已知边界与未做
+
+- **可视化带宽**：1440×1080×3 = 4.67MB/帧，30Hz ≈140MB/s，本机 rqt/订阅端吃不下（表现为"卡"）；曾实现"限流 + 缩放"（A/B 两参数），**按用户要求已回档**——真机相机流阶段再处理；
+- **未做**：④ PnP 降自由度（固定 pitch/roll + 1D yaw 优化）、R/Q 噪声建模升级、整车 EKF、数字识别、仿真接入、棋盘标定内参。

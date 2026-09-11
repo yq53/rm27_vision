@@ -72,6 +72,11 @@ def _launch_setup(context, *args, **kwargs):
 
     params = dict(source_param)
     params["model_path"] = PathJoinSubstitution([repo_root, LaunchConfiguration("model_path")])
+    params["detector"] = LaunchConfiguration("detector")
+    if LaunchConfiguration("pose_model_path").perform(context):
+        params["pose_model_path"] = PathJoinSubstitution(
+            [repo_root, LaunchConfiguration("pose_model_path")]
+        )
 
     actions.append(LogInfo(msg=f"[armor_tracker.launch] 图像源 = {source_desc}"))
     actions.append(
@@ -104,7 +109,9 @@ def generate_launch_description():
             DeclareLaunchArgument("video_path", default_value="data/demo.avi", description="source:=video 时的视频路径"),
             DeclareLaunchArgument("ip_url", default_value="", description="source:=ip 时的流地址(如 http://<IP>:8080/video)"),
             DeclareLaunchArgument("camera_config", default_value="data/camera.yaml", description="source:=hik 时的 yaml 配置"),
-            DeclareLaunchArgument("model_path", default_value="models/armor_yolov8n.onnx", description="ONNX 模型路径"),
+            DeclareLaunchArgument("model_path", default_value="models/armor_yolov8n.onnx", description="bbox 检测器模型路径"),
+            DeclareLaunchArgument("detector", default_value="bbox", description="检测器: bbox | pose（四关键点）"),
+            DeclareLaunchArgument("pose_model_path", default_value="", description="detector:=pose 时的四关键点模型路径"),
             DeclareLaunchArgument("repo_root", default_value=".", description="仓库根目录(相对路径的基准, 可给绝对路径)"),
             DeclareLaunchArgument("use_rqt", default_value="false", description="是否附带启动 rqt_image_view"),
             DeclareLaunchArgument("rmw", default_value="rmw_fastrtps_cpp", description="RMW 实现(本机需 FastDDS)"),

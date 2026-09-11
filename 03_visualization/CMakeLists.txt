@@ -44,7 +44,7 @@ add_executable(armor_tracker_node src/armor_tracker_node.cpp src/image_source.cp
 ament_target_dependencies(
   armor_tracker_node rclcpp sensor_msgs std_msgs cv_bridge rm_interfaces
 )
-target_link_libraries(armor_tracker_node armor_detector armor_ekf ${OpenCV_LIBS})
+target_link_libraries(armor_tracker_node armor_detector armor_pose_detector armor_ekf ${OpenCV_LIBS})
 if(USE_HIK_SDK)
   target_compile_definitions(armor_tracker_node PRIVATE RM_USE_HIK_SDK=1)
   target_include_directories(armor_tracker_node PRIVATE ${MVS_SDK_DIR}/include)

@@ -35,6 +35,8 @@ rm27_vision/
 - **RMW 必读**：本机默认 CycloneDDS 传大图像消息不稳定（rqt 无画面）→ 请用 FastDDS：
   `export RMW_IMPLEMENTATION=rmw_fastrtps_cpp`（建议写入 `~/.bashrc`）。
 - 程序约定在**仓库根目录**下运行（默认相对路径 `data/`、`models/`）。
+- ⚠️ 本文档命令里的示例值（路径/IP）**请替换成你自己的**；不要直接粘贴带尖括号的占位符——
+  bash 会把 `<` 当成输入重定向而报语法错误（正确做法：用变量或真实路径，如 `-p pose_model_path:="$POSE_MODEL"`）。
 - 若 `~/.ros` 只读导致日志报错：`export ROS_LOG_DIR=$PWD/.roslog`。
 
 ## 构建
@@ -148,7 +150,7 @@ cd <仓库根目录> && source install/setup.bash
 ros2 launch rm_armor_visualization armor_tracker.launch.py
 
 # 手机 IP Webcam（横屏；ip_url 必须带 /video）
-ros2 launch rm_armor_visualization armor_tracker.launch.py source:=ip ip_url:=http://<手机IP>:8080/video
+ros2 launch rm_armor_visualization armor_tracker.launch.py source:=ip ip_url:=http://192.168.1.10:8080/video   # 换成你手机的实际 IP
 
 # 现场海康（改 data/camera.yaml 的 serial_number；需先用 USE_HIK_SDK=ON 构建）
 ros2 launch rm_armor_visualization armor_tracker.launch.py source:=hik
@@ -187,7 +189,7 @@ ros2 run rm_armor_visualization armor_tracker_node --ros-args -p camera_config:=
 
 # 终端1'：真实相机（手机 IP Webcam——必须横屏！地址以 App 显示为准）
 ros2 run rm_armor_visualization armor_tracker_node \
-    --ros-args -p video_path:=http://<手机IP>:8080/video
+    --ros-args -p video_path:=http://192.168.1.10:8080/video   # 换成你手机的实际 IP
 
 # 终端2：查看状态与标注图
 ros2 topic echo /armor/state --once
@@ -196,6 +198,42 @@ ros2 run rqt_image_view rqt_image_view /armor/annotated
 
 > 手机流地址**必须带 `/video`**（裸地址是网页，VideoCapture 打不开）；竖屏会产生 90° 旋转元数据 → PnP 镜像假解（z<0），**务必横屏**。
 > `armor_video_node` 用法相同，仅发布标注图（参数 `video_path/model_path/loop`，默认 loop=true）。
+
+### 可选：四关键点模型（`detector:=pose`，2026-09-10 实测）
+
+默认检测器仍是我们自训的 bbox 模型；本小节是**可选的第二种检测器**（模型直出灯条端点，无需 bbox 角点近似）。
+
+- **模型来源与许可**：深大 RobotPilots 开源的 `Infantry-v8n`（YOLOv8n-Pose 四关键点）ONNX。
+  仓库标称 MIT，但**模型元数据标注 AGPL-3.0（Ultralytics）** → 本仓库**不提交权重**，请自行下载。
+- **关键点语义（已实测确认）**：4 个点是**灯条端点**，不是板四角 → PnP 物体模型用 `135mm × 56mm`；
+  索引映射 `kp0/kp3/kp2/kp1 → TL/TR/BR/BL`。用错模型的代价：板四角模型重投影 8.09px、反向绕向 25.6px，正确为 **1.09px**。
+- **推理后端**：
+  - 该导出图含 OpenCV 4.x 不支持的算子（`NaryEltwise` 广播），**cv2.dnn 无法加载**；
+  - 使用 ONNX Runtime 后端（下载 `onnxruntime-linux-x64-*.tgz`）：
+    ```bash
+    colcon build --packages-up-to rm_armor_visualization \
+        --cmake-args -DUSE_ONNXRUNTIME=ON -DONNXRUNTIME_DIR="$ORT_DIR"   # ORT_DIR 见上（onnxruntime 解压目录）
+    ```
+  - ONNX Runtime **直接用原始 fp16 ONNX**；若要改用 cv2.dnn，先用
+    `01_detector/scripts/convert_fp16_to_fp32.py` 转 fp32（产物仅供 cv2.dnn 使用）。
+- **运行**（先把两个路径设成环境变量，命令即可直接复制粘贴）：
+  ```bash
+  ORT_DIR=$HOME/onnxruntime-linux-x64-1.23.2                       # ORT 解压目录
+  POSE_MODEL=$HOME/models/Infantry-v8n-fp16-20260726.onnx          # 四关键点 fp16 模型
+  ros2 run rm_armor_visualization armor_tracker_node --ros-args \
+      -p video_path:=data/demo.avi -p detector:=pose -p pose_model_path:="$POSE_MODEL"
+  # 或
+  ros2 launch rm_armor_visualization armor_tracker.launch.py detector:=pose pose_model_path:="$POSE_MODEL"
+  ```
+- **实测（demo.avi 687 帧，同一 EKF/同一指标口径）**：
+
+  | 指标 | bbox 基线 | pose 关键点 |
+  |---|---|---|
+  | 检出帧 | 498（72.49%） | **620（90.25%）** |
+  | PnP 通过 | 415（60.41%） | **604（87.92%）** |
+  | 重投影 | 4.11 px | **1.19 px** |
+  | 相邻帧距离跳动 | 0.0853 m | **0.0322 m** |
+  | 检测耗时 | 37.96 ms | **26.81 ms** |
 
 ### 真实相机验证证据（2026-09-09）
 
