@@ -88,6 +88,69 @@ std::string serialOf(const MV_CC_DEVICE_INFO* dev) {
     return "";
 }
 
+// 像素格式 -> 可读名字（只列常见几种，其余返回"未知格式"）
+const char* pixelTypeName(MvGvspPixelType type) {
+    switch (type) {
+    case PixelType_Gvsp_BGR8_Packed: return "BGR8_Packed";
+    case PixelType_Gvsp_RGB8_Packed: return "RGB8_Packed";
+    case PixelType_Gvsp_Mono8:       return "Mono8";
+    case PixelType_Gvsp_BayerRG8:    return "BayerRG8";
+    case PixelType_Gvsp_BayerGR8:    return "BayerGR8";
+    case PixelType_Gvsp_BayerGB8:    return "BayerGB8";
+    case PixelType_Gvsp_BayerBG8:    return "BayerBG8";
+    default:                         return "未知格式";
+    }
+}
+
+// 把 相机流 的一帧转成 BGR；返回 false 表示这个格式我们不认识（调用方跳过该帧）
+bool frameToBgr(const MV_FRAME_OUT& frame_out, cv::Mat& out) {
+    const auto& info = frame_out.stFrameInfo;   // 图像信息
+    const int w = static_cast<int>(info.nWidth);    // width
+    const int h = static_cast<int>(info.nHeight);   // height
+    unsigned char* data = frame_out.pBufAddr;       // 图像指针地址
+
+    // 像素格式检测，并处理输出成BGR
+    switch (info.enPixelType) {
+    case PixelType_Gvsp_BGR8_Packed: { // 相机直接给 BGR：零转换
+        cv::Mat raw(h, w, CV_8UC3, data);
+        raw.copyTo(out); // 拷贝出 SDK 缓冲区
+        return true;
+    }
+    case PixelType_Gvsp_RGB8_Packed: { // 相机给 RGB：换个通道顺序
+        cv::Mat raw(h, w, CV_8UC3, data);
+        cv::cvtColor(raw, out, cv::COLOR_RGB2BGR);
+        return true;
+    }
+    case PixelType_Gvsp_Mono8: { // 灰度：复制成三通道
+        cv::Mat raw(h, w, CV_8UC1, data);
+        cv::cvtColor(raw, out, cv::COLOR_GRAY2BGR);
+        return true;
+    }
+    case PixelType_Gvsp_BayerRG8: { // Bayer 原始格式（海康常见默认，第一行 R G）：去马赛克
+        cv::Mat raw(h, w, CV_8UC1, data);
+        cv::cvtColor(raw, out, cv::COLOR_BayerBG2BGR);
+        return true;
+    }
+    case PixelType_Gvsp_BayerGR8: {
+        cv::Mat raw(h, w, CV_8UC1, data);
+        cv::cvtColor(raw, out, cv::COLOR_BayerGB2BGR);
+        return true;
+    }
+    case PixelType_Gvsp_BayerGB8: {
+        cv::Mat raw(h, w, CV_8UC1, data);
+        cv::cvtColor(raw, out, cv::COLOR_BayerGR2BGR);
+        return true;
+    }
+    case PixelType_Gvsp_BayerBG8: {
+        cv::Mat raw(h, w, CV_8UC1, data);
+        cv::cvtColor(raw, out, cv::COLOR_BayerRG2BGR);
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
 } // namespace
 
 class HikSource: public ImageSource {
@@ -145,6 +208,46 @@ public:
         ret = MV_CC_SetFloatValue(handle_, "Gain", cfg.gain);
         printRet("Gain", ret);
 
+        // 发送请求
+        if (!cfg.pixel_format.empty()) {
+            const int r =
+                MV_CC_SetEnumValueByString(handle_, "PixelFormat", cfg.pixel_format.c_str());
+            std::printf(
+                "[hik_source] 请求像素格式 %s：%s\n",
+                cfg.pixel_format.c_str(),
+                r == MV_OK ? "成功" : "该相机不支持，将按它实际输出的格式做转换"
+            );
+        }
+        if (!cfg.adc_bit_depth.empty()) {
+            const int r =
+                MV_CC_SetEnumValueByString(handle_, "ADCBitDepth", cfg.adc_bit_depth.c_str());
+            if (r != MV_OK) {
+                std::printf(
+                    "[hik_source] 设置 ADCBitDepth=%s 失败（0x%X）：若输出变成 BayerRG10/12 请检查此项\n",
+                    cfg.adc_bit_depth.c_str(),
+                    r
+                );
+            }
+        }
+        if (!cfg.trigger_mode.empty()) {
+            const int r =
+                MV_CC_SetEnumValueByString(handle_, "TriggerMode", cfg.trigger_mode.c_str());
+            if (r != MV_OK) {
+                std::printf(
+                    "[hik_source] 设置 TriggerMode=%s 失败（0x%X）：若一帧都收不到请检查此项\n",
+                    cfg.trigger_mode.c_str(),
+                    r
+                );
+            }
+        }
+        if (cfg.format != "bgr") {
+            std::printf(
+                "[hik_source] 注意 format=%s：本工程下游（检测器 / cv_bridge）按 BGR8 处理，"
+                "这里仍输出 bgr\n",
+                cfg.format.c_str()
+            );
+        }
+
         // 捕获相机流，推入buffer
         if (MV_CC_StartGrabbing(handle_) != MV_OK) {
             MV_CC_CloseDevice(handle_);
@@ -167,6 +270,7 @@ public:
         return (handle_ != nullptr) && grabbing_;
     }
 
+    // 相机流读取函数
     bool read(cv::Mat& out) override {
         if (!isOpened()) {
             return false;
@@ -181,21 +285,34 @@ public:
             return false;
         }
 
-        // 检测图像像素信息
+        // 相机实际输出的格式只报一次，方便现场确认
         const auto& info = frame_out.stFrameInfo;
-        bool ok = false;
-        if (info.enPixelType == PixelType_Gvsp_BGR8_Packed) {
-            cv::Mat raw(info.nHeight, info.nWidth, CV_8UC3, frame_out.pBufAddr);
-            raw.copyTo(out); // 拷贝出 SDK 缓冲区
-            ok = true;
-        } else if (info.enPixelType == PixelType_Gvsp_Mono8) {
-            cv::Mat gray(info.nHeight, info.nWidth, CV_8UC1, frame_out.pBufAddr);
-            cv::cvtColor(gray, out, cv::COLOR_GRAY2BGR);
-            ok = true;
-        } else {
-            std::printf("[hik_source] 不支持的像素格式 %d，跳过本帧\n",
-                        static_cast<int>(info.enPixelType));
+        if (!first_frame_reported_) {
+            std::printf(
+                "[hik_source] 相机实际输出格式：%s（0x%08X）\n",
+                pixelTypeName(info.enPixelType),
+                static_cast<unsigned>(info.enPixelType)
+            );
+            first_frame_reported_ = true;
         }
+
+        const bool ok = frameToBgr(frame_out, out);
+
+        // 转化错误，未知输入格式
+        if (!ok) {
+            // 前几帧各报一次，之后每 300 帧报一次，避免刷屏
+            ++skipped_frames_;
+            if (skipped_frames_ <= 3 || skipped_frames_ % 300 == 0) {
+                std::printf(
+                    "[hik_source] 不支持的像素格式 %s（0x%08X），累计跳过 %d 帧；"
+                    "可在 data/camera.yaml 设置 pixel_format，或检查相机是否被设成 10/12bit 输出\n",
+                    pixelTypeName(info.enPixelType),
+                    static_cast<unsigned>(info.enPixelType),
+                    skipped_frames_
+                );
+            }
+        }
+
         MV_CC_FreeImageBuffer(handle_, &frame_out); // 归还缓冲
         return ok;
     }
@@ -222,6 +339,8 @@ private:
 
     void* handle_ = nullptr;
     bool grabbing_ = false;
+    bool first_frame_reported_ = false; // 首帧报一次"相机实际输出格式"
+    int skipped_frames_ = 0;            // 累计跳过的帧数（格式不认识时）
 };
 #endif // RM_USE_HIK_SDK
 
@@ -249,6 +368,18 @@ SourceConfig loadSourceConfig(const std::string& yaml_path) {
     }
     if (root["gain"]) {
         cfg.gain = root["gain"].as<double>();
+    }
+    if (root["pixel_format"]) {
+        cfg.pixel_format = root["pixel_format"].as<std::string>();
+    }
+    if (root["adc_bit_depth"]) {
+        cfg.adc_bit_depth = root["adc_bit_depth"].as<std::string>();
+    }
+    if (root["trigger_mode"]) {
+        cfg.trigger_mode = root["trigger_mode"].as<std::string>();
+    }
+    if (root["format"]) {
+        cfg.format = root["format"].as<std::string>();
     }
     return cfg;
 #else

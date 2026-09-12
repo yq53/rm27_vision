@@ -131,6 +131,10 @@
 | rqt 窗口开了但**一直没有图像** | 主节点已退出。launch 现在会跟着退出并打印"[armor_tracker.launch] 主节点已退出…"提示；最常见原因是 `detector:=pose` 但构建未启用 ONNX Runtime（用 `ORT_DIR=… bash scripts/setup.sh` 重建），或视频/模型/相机路径不对 | `README.md`「第三步」前置条件与 FAQ |
 | 想启用 pose（要装 ONNX Runtime） | **首选** `sudo apt install ros-humble-onnxruntime-vendor`（ROS2 软件源里就有；**真机实测**：装完 `setup.sh` 零配置自动探测到，② 直接可用）；**备选** 下载 `onnxruntime-linux-x64-*.tgz` 解压后 `ORT_DIR=… bash scripts/setup.sh`。⚠️ `pip install onnxruntime` 是 **Python** 包，C++ 链接不了 | `README.md` 第二步 2.1 / 第三步 ② |
 | 不确定这台机器缺什么依赖 | 跑 `bash scripts/check_env.sh`：逐项自检（系统/工具链/ROS2 与所需包/colcon/OpenCV/可选 ORT 与 MVS/素材），缺失项直接给安装命令，退出码 0=齐全、1=有缺失 | `README.md`「第二步：环境配置」 |
+| 海康相机日志刷 `不支持的像素格式 17301513` | `0x01080009 = BayerRG8`；原实现只认 `BGR8_Packed`/`Mono8` → **每帧都被跳过**（节点还活着，所以 `ros2 launch` 看似正常）。现已支持七种格式；若仍出现，多半是 `BayerRG10/12`（`adc_bit_depth` 没钉成 `Bits_8`） | `log.md §19.10` |
+| 海康画面**红蓝互换**（红装甲板看着是蓝） | Bayer 相位取错：OpenCV 按图案"第二行第 2、3 个像素"命名，海康/GenICam 按"第一行前两个像素"命名，两边差一格 → `BayerRG8` 必须用 `COLOR_BayerBG2BGR`（写成同名的 `BayerRG2BGR` 就红蓝互换） | `log.md §19.10` |
+| 不想让本程序改动相机设置 | `data/camera.yaml` 的 `pixel_format` / `adc_bit_depth` / `trigger_mode` **留空 = 不调用 SDK**、用相机自己的默认值；`format` 是本工程自己的输出约定，不能留空 | `log.md §19.10` |
+| 相机设置"成功了"却没生效 | 三个相机侧设置都只是**请求**，相机可拒绝（返回码只警告、不中断）；`ADCBitDepth` 是 `PixelFormat` 的父设置，部分节点还只在停止取流时可写 → 权威判据是首帧那行 `相机实际输出格式：…` | `log.md §19.10` |
 
 ## 7. 负结果与已知局限
 

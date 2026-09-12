@@ -1148,6 +1148,80 @@ v2：框内**灯条精定位**（灯条端点 → 更准的四角点 → PnP 更
 - **参数校验**：`source` 非三值之一 → 抛错并列出可选值；`source:=ip` 未给 `ip_url` → 抛错并给示例。
 - **实测（本机）**：A 默认 video 仓库根目录 ✅；B 从 `~` + `repo_root` 绝对路径 ✅；C `source:=ip` 缺 url → 明确报错 ✅；D `source:=hik` 无相机 → hik 报错链正常 ✅（D 能打印"未发现相机"即证明 launch 自动设置的 LD_LIBRARY_PATH 生效，否则 MVS 库都加载不了）。rqt 面板（`use_rqt:=true`）已在桌面会话实测通过：窗口正常弹出并显示 `/armor/annotated` 标注图（2026-09-10 用户验证 ✅）。
 
+### 19.10 相机像素格式兼容与 Bayer 相位修正（2026-09-12，真机实测反馈）
+
+**起因**：`source:=hik` 接上真机后节点能起、话题能发，但画面全空，日志反复刷
+`[hik_source] 不支持的像素格式 17301513，跳过本帧`。`17301513 = 0x01080009`，对照
+`/opt/MVS/include/PixelType.h` 即 **`PixelType_Gvsp_BayerRG8`** —— 原实现只认 `BGR8_Packed` 与 `Mono8`，
+于是**相机每帧都被跳过**；节点进程还活着，所以 `ros2 launch` 看起来"正常"（老坑：节点退 255 而 launch 返回 0）。
+另有反馈提示："你没写 format，参考一下我们自家项目的 yaml"。
+
+**改动**（`03_visualization/src/image_source.cpp` / `image_source.hpp`、`data/camera.yaml`）
+
+| 位置 | 内容 |
+|---|---|
+| `frameToBgr()`（cpp:114–157，新增） | 把 SDK 一帧统一转 BGR：`BGR8_Packed` 拷贝 / `RGB8_Packed` 换序 / `Mono8` 转三通道 / `BayerRG8`·`GR8`·`GB8`·`BG8` 去马赛克；其余格式返回 false，由调用方跳帧 |
+| 构造函数（cpp:218–260） | yaml 写了才设 `PixelFormat` / `ADCBitDepth` / `TriggerMode`（`MV_CC_SetEnumValueByString`，**失败只警告不中断**——因为下面有兜底层） |
+| `read()`（cpp:295–321） | 首帧打印**相机实际输出格式**（名字 + `0x%08X`）；不认识的格式累计计数，前 3 帧与每 300 帧各提示一次 |
+| `data/camera.yaml` | 新增 `pixel_format: BayerRG8` / `adc_bit_depth: Bits_8` / `trigger_mode: Off` / `format: bgr`（键名与自家项目 yaml 对齐） |
+
+**本轮最重要的发现：OpenCV 与 GenICam 的 Bayer 命名"错开一格"**
+
+第一版按"同名对应"写（`BayerRG8 → COLOR_BayerRG2BGR`），**红蓝会互换**——对装甲板红蓝分类是致命的。
+三条独立证据：
+
+1. **OpenCV 自己的定义**：`imgproc.hpp:754` 注明 `COLOR_BayerBG2BGR` "equivalent to RGGB"，助记别名写作
+   `COLOR_BayerRGGB2BGR = COLOR_BayerBG2BGR`（"输入 RGGB、要 BGR"就用它）。即 OpenCV 按图案
+   **第二行第 2、3 个像素**命名，而海康/GenICam 按**第一行前两个像素**命名（`BayerRG8` = 第一行 R G），两边差一格。
+2. **合成帧白盒测试**（离线，无需相机）：按四种相位各合成一张单通道 Bayer 图，再逐个跑 OpenCV 的四个转换码，
+   与原始 BGR 图比平均误差（只统计内部区域，避开去马赛克边界）：
+
+   | GenICam 相位 | `BayerBG2BGR` | `BayerGB2BGR` | `BayerRG2BGR` | `BayerGR2BGR` | 正确码 |
+   |---|---|---|---|---|---|
+   | `BayerRG8`（RGGB） | **1.4** | 173.7 | 107.7 | 171.7 | `COLOR_BayerBG2BGR` |
+   | `BayerGR8`（GRBG） | 171.7 | **1.5** | 173.7 | 109.6 | `COLOR_BayerGB2BGR` |
+   | `BayerGB8`（GBRG） | 171.7 | 107.7 | 173.7 | **1.4** | `COLOR_BayerGR2BGR` |
+   | `BayerBG8`（BGGR） | 109.6 | 173.7 | **1.5** | 171.7 | `COLOR_BayerRG2BGR` |
+
+   同一张图的红块内部像素真值 `(B,G,R)=(0,0,255)`：修正前输出 `(255,0,0)`（红蓝互换），修正后 `(0,0,255)`。
+   另测 `BGR8_Packed` / `RGB8_Packed` / `Mono8` 三条直通路径误差均为 **0.0000**；`BayerRG10` 正确返回 false（不崩）。
+3. **两个参考项目实际调用的就是同一个码**：同济 `sp_vision_25/io/hikrobot/hikrobot.cpp:137-140` 与武科大
+   `awakening` 的 `hik_camera.hpp`（`CVT_MAP_BGR`）都写 `BayerRG8 → COLOR_BayerRG2RGB`，而 OpenCV 里
+   **`COLOR_BayerRG2RGB == COLOR_BayerBG2BGR == 46`**（编译打印验证过）——它们**实际执行的就是 46**，
+   与我们修正后的码一致（名字取自镜像别名，数值才是真相）。武科大 yaml 的相机段同为
+   `pixel_format: BayerRG8` + `adc_bit_depth: Bits_8` + `format: "bgr"`，走的正是这条路径。
+
+> 另一条路（**本轮未采纳**）：海康官方样例 `Samples/32/OpenCV/C++/RawDataFormatConvert_OpenCV4` 的注释明确建议
+> Bayer 一律交给 SDK —— `MV_CC_ConvertPixelType` 转 `PixelType_Gvsp_BGR8_Packed`，相位由厂商负责，且顺带支持
+> `BayerRG10/12`（我们现在遇到 10/12bit 会跳帧）。列为待办，见本节末。
+
+**概念沉淀（本轮对话）**
+
+- `MV_CC_SetEnumValueByString(handle_, "PixelFormat", "BayerRG8")` 是对**相机内部一个功能节点**的远程写。
+  枚举节点有"符号名"和"整数下标"两副面孔：`ByString` 说的是**我们按符号名指定**（值直接来自 yaml，不必维护
+  "名字→下标"的映射表），**相机内部存的是下标**。内部依次做四件事：找节点 → 找枚举项 → 查当前可写性 → 写入；
+  任一步失败就返回错误码且**不改动任何东西**。
+- 所以这些设置**都是"请求"**，相机可以拒绝；而且**拒绝不等于没有数据**——它会照自己的默认格式继续出帧
+  （本次故障正是如此：帧一直有，只是形状不认识）。两条通道要分清：**控制通道**（`Set*`/`Get*`，回状态码，小消息）
+  与**数据通道**（`MV_CC_GetImageBuffer`，回帧）；两者的结合点就是 `stFrameInfo.enPixelType`。
+- 三个键各管一维：`PixelFormat` = 帧数据的**形状**；`ADCBitDepth` = 采样**精度**（且是 `PixelFormat` 可选集的
+  "父"设置）；`TriggerMode` = 出帧**时机**（`On` 而无人发触发 → 一帧都收不到）。顺带：读侧**没有** `ByString` 版本，
+  回读要两跳（`MV_CC_GetEnumValue` 取当前下标 + `MV_CC_GetEnumEntrySymbolic` 换成名字）。
+- **为什么相机侧三个键默认是空**：空字符串在这里是哨兵值，含义是"yaml 没写这个键 → 根本不要调用 SDK"
+  （`if (!cfg.x.empty())` 守卫），这样"你没写 = 我不碰相机"才成立。而 `format` 是本工程自己的输出约定，
+  缺省必须有确定值（`bgr`），否则 `cfg.format != "bgr"` 会把"没写"误判成"写了别的"、每次启动打假警告。
+- **为什么不抛异常**：三个设置都只是"让相机直接给我们好格式"的优化，下面有 `frameToBgr` 兜底，它们失败不该让
+  整个节点起不来；三条警告各自写明"失败会导致什么症状"（无影响 / 可能变成 BayerRG10-12 而跳帧 / 一帧都收不到），
+  便于现场对号入座。
+
+**验证边界（如实说明）**：本机**没有海康相机**。已验：① 编译通过；② 合成帧白盒测试（上表）；
+③ 视频通路冒烟正常（`检测器: bbox` + `publishing /armor/annotated & /armor/state`）；④ 未知格式返回 false 而不崩。
+**未验**：真机取流与相位是否符合现场那台相机——现场看 `[hik_source] 相机实际输出格式：…` 这一行即可判断。
+
+**待办（已评估，按要求暂不做）**：① Bayer 一律走 SDK `MV_CC_ConvertPixelType`（顺带支持 `BayerRG10/12`）；
+② 设置顺序改为 `ADCBitDepth → PixelFormat → TriggerMode`（父设置先于子设置，避免设完又被父设置重置）；
+③ 设完回读校验；④ 把上面那个合成帧白盒测试程序入库（现为临时文件，方法已完整记录在本节）。
+
 ## 20. 四关键点模型接入与评测体系（2026-09-10）
 
 ### 20.1 为什么做这条线
@@ -1344,6 +1418,8 @@ v2：框内**灯条精定位**（灯条端点 → 更准的四角点 → PnP 更
 | **修"干净环境跑 pose 失败"的体验问题**（2026-09-12，由用户在新副本实测发现）：ORT 探测扩到 7 个候选路径、未找到时提示用 `ORT_DIR=` 重跑；launch 用 `OnProcessExit + Shutdown` 让"主节点退出即整体退出"（`Node` 在 Humble 不支持 `required`）；README 把"pose 需要 ORT"提为显式前置 + 补 FAQ | ✅ 第三步前置条件 / FAQ / v3.10 | ✅ 本节 |
 | 「快速开始」（只引导到题3）+ 顶部「快速验证（题3：demo 视频 / 海康相机 × bbox / pose）」+ 各题自己的预期效果 | ✅ | ✅ 本节 |
 | 版本号约定（只有实质变化才进位大版本） | ✅「修订记录」开头 | ✅ 本节 |
+| **海康相机像素格式兼容 + Bayer 相位修正**（2026-09-12，真机实测反馈）：原实现只认 `BGR8_Packed`/`Mono8`，而真机输出 `BayerRG8`（0x01080009）→ **每帧都被跳过**、画面全空；现新增 `frameToBgr()` 覆盖 7 种格式、`data/camera.yaml` 增 4 个键（对齐自家项目 yaml）、首帧打印相机实际格式。**顺带修正"同名 Bayer 转换码会让红蓝互换"的相位错误**（OpenCV 与 GenICam 命名差一格） | ✅ README v3.17 + 第三步 B / 相机通路 / 04_hik / FAQ / 证据索引 | ✅ §19.10 |
+| `docs/notes.md` §6 补 4 条相机侧踩坑（像素格式不支持 / 红蓝互换 / 留空=不碰相机 / 请求可被拒） | ✅ FAQ 同步补 3 条 | ✅ §19.10 |
 
 ### 22.4 对照中发现并已修正的不一致
 

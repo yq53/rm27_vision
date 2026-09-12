@@ -20,6 +20,13 @@ struct SourceConfig {
     std::string serial_number; // hik 源：现场只改这个
     double exposure_time_us = 2000.0;
     double gain = 8.0;
+
+    // hik 源的"格式"相关，名字对齐战队自家项目 config/*.yaml 的写法。
+    // 分两组：前三个写给相机（留空 = 不动相机、用它自己的默认值），最后一个管我们自己的输出。
+    std::string pixel_format;  // 例 BayerRG8 / Mono8 / RGB8Packed（海康默认常是 Bayer 原始格式）
+    std::string adc_bit_depth; // 例 Bits_8（钉死 8bit；10/12bit 会变成 BayerRG10/12，处理方式不同）
+    std::string trigger_mode;  // 例 Off（连续采集；On 而没有触发信号时一帧都收不到）
+    std::string format = "bgr"; // 交给下游的像素格式；本工程下游（检测器 / cv_bridge）按 BGR8 处理
 };
 
 // 读取 camera.yaml。默认构建(未开 USE_HIK_SDK)不支持，会抛异常说明。

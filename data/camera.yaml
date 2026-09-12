@@ -7,6 +7,17 @@ video_path: data/demo.avi
 loop: true
 
 # ---- backend: hik（海康工业相机）----
-serial_number: ""
-exposure_time_us: 2000.0
-gain: 8.0
+serial_number: ""            # 现场只改这一处（相机上的序列号，缺省 12 位）
+
+# 相机侧的格式设置（留空 = 不动相机，用它自己的默认值）
+pixel_format: BayerRG8       # 像素格式：BayerRG8 / Mono8 / RGB8Packed …
+                             # 海康默认常常是 Bayer 原始格式（BayerRG8 = 0x01080009），
+                             # 我们代码会把它去马赛克转成 BGR；若相机不支持这个值，会打印警告并按其实际输出转换
+adc_bit_depth: Bits_8        # 位深钉死 8bit：设成 10/12bit 会变成 BayerRG10/12（2 字节/像素），处理方式不同
+trigger_mode: Off            # Off = 连续采集；若为 On 而没人发触发信号，会一帧都收不到
+
+# 交给下游的格式（本工程检测器 / cv_bridge 都按 BGR8 处理）
+format: bgr
+
+exposure_time_us: 2000.0     # 曝光（微秒）
+gain: 8.0                    # 增益（dB）

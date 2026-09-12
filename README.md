@@ -160,13 +160,17 @@ ros2 launch rm_armor_visualization armor_tracker.launch.py source:=hik \
 
 - **接上真机**：与 A 完全一样，只是画面来自相机实时流。构建需启用 MVS SDK——
   `setup.sh` 检测到 `/opt/MVS` 会自动打开 `USE_HIK_SDK`（收尾会打印开关状态）。
+- **像素格式自动适配**：`data/camera.yaml` 里的 `pixel_format` / `adc_bit_depth` / `trigger_mode` 会以
+  "请求"形式发给相机（相机不支持时只警告、不中断）；相机实际输出什么格式，都由 `frameToBgr()` 统一转成 BGR
+  （支持 `BGR8_Packed` / `RGB8_Packed` / `Mono8` / `BayerRG8`·`GR8`·`GB8`·`BG8`）。
+  节点启动后会打印一行 `[hik_source] 相机实际输出格式：…`——**现场排障先看这一行**。
 - **没接相机**（本仓库开发机就是这种情况，如实说明）：节点打印
   `[hik_source] 未发现相机（检查网线/USB 与相机电源）` 后退出 255，**而 `ros2 launch` 自身仍返回 0**——
   成败要看节点日志。能走到这条日志，说明 SDK 链路、构建、参数传递都是通的。
 - 完整踩坑与验证边界见「04_hik」小节。
 
 > 上面 4 条中，A 的两条已于 2026-09-11 在本仓库实测通过；B 的两条因本机没有相机，
-> 只验证到"枚举不到设备并明确报错"这一步。
+> 只验证到"枚举不到设备并明确报错"这一步（**像素格式转换层另有离线白盒验证**，见 log.md §19.10）。
 
 ## 考核要求对照
 
@@ -760,6 +764,10 @@ ros2 launch rm_armor_visualization armor_tracker.launch.py source:=hik use_rqt:=
 > 手机流地址**必须带 `/video`**（裸地址是网页，`VideoCapture` 打不开）；竖屏会产生 90° 旋转元数据 →
 > PnP 镜像假解（z<0），**务必横屏**。
 
+> 海康源的 `data/camera.yaml` 除序列号外还有三项**相机侧设置**（`pixel_format` / `adc_bit_depth` / `trigger_mode`）
+> 与一项输出约定（`format: bgr`）：前三项以"请求"形式发给相机，相机不支持时只警告、不中断，**留空 = 完全不碰相机**；
+> 无论相机输出哪种格式，节点都会转成 BGR 交给下游（详见 log.md §19.10）。
+
 ### 相机通路验证证据（2026-09-09）
 
 ![手机 IP Webcam + rqt 实时标注](docs/screenshots/phone_rqt.png)
@@ -831,12 +839,14 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
   再 `export LD_LIBRARY_PATH=/opt/MVS/lib/64:$LD_LIBRARY_PATH`。
 - 取帧数传非数字会抛未捕获异常、进程 abort（退出 134）——传数字即可。
 - 主节点用的是封装后的版本（`image_source.cpp` 的 `#ifdef RM_USE_HIK_SDK` 段 + `data/camera.yaml`）：
-  **现场展示只需改 `data/camera.yaml` 里的 `serial_number`，代码不用动**。踩坑记录见 log.md §19。
+  **现场展示只需改 `data/camera.yaml` 里的 `serial_number`，代码不用动**；像素格式适配（Bayer/Mono8/RGB8 → BGR）
+  见 log.md §19.10，踩坑记录见 log.md §19。
 
-> **验证边界（如实说明）**：本工程开发机上**没有海康相机**，所以这条通路验证到
-> 「枚举到 0 台设备并优雅提示、退出码 0」为止；`StartGrabbing` → `GetImageBuffer` → `cv::Mat`
-> 这段取流与像素格式转换（含 MVS 5.0.2 的 `pBufAddr` 踩坑修正）已按 SDK 头文件实现，
-> **需在接上真机后确认**。它本来就是按"现场会接海康相机"准备的：届时填上序列号即可切流。
+> **验证边界（如实说明）**：本工程开发机上**没有海康相机**，所以"真机取流"这段只验证到
+> 「枚举到 0 台设备并优雅提示、退出码 0」为止（含 MVS 5.0.2 的 `pBufAddr` 踩坑修正），
+> **取流本身与 Bayer 相位仍需接上真机确认**。可以离线验证的部分已经验过：像素格式转换层用**合成帧白盒测试**
+> 逐个格式核对（四种 Bayer 相位 × 四个 OpenCV 转换码：正确码平均误差 1.4、取错的镜像码 107.7；
+> `BGR8_Packed` / `RGB8_Packed` / `Mono8` 直通误差 0）——方法、数据与本轮全部证据见 log.md §19.10。
 
 ---
 
@@ -858,6 +868,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | 题2 平滑效果 | —（生成物） | `./build/02_tracker/tracker_demo data/demo.avi models/armor_yolov8n.onnx 300` → `results/tracker_demo.avi` |
 | ② 角点精修负结果 | —（调试图生成物） | `RM_CORNER_DEBUG=1 ./build/02_tracker/eval_demo data/demo.avi models/armor_yolov8n.onnx 200 t_refine refine bbox` → `results/corner_dbg_*.png` |
 | 题3 相机通路验证 | `results/real_camera_2026-09-09.mkv`、`docs/screenshots/phone_rqt.png` | `source:=ip` + 手机横屏（靶面=笔记本屏幕播放 demo.avi） |
+| 像素格式转换（Bayer/Mono8/RGB8 → BGR） | —（离线白盒测试，程序为临时文件、未入库） | 照 log.md §19.10 的方法：合成四种 Bayer 相位 × 四个 OpenCV 转换码比平均误差（正确码 1.4、取错的镜像码 107.7）；结论是 `BayerRG8` 必须用 `COLOR_BayerBG2BGR` |
 | pose 模式的可视化 | `docs/screenshots/pose_rqt.png` | `ros2 launch rm_armor_visualization armor_tracker.launch.py detector:=pose pose_model_path:="$POSE_MODEL" use_rqt:=true` |
 | 快速建立整体认识 | `docs/notes.md`（**主题归纳**，9 节） | 架构 / 关键常数 / 两种检测器 / 语义与后端 / 位姿与滤波 / 评测口径 / 踩坑速查 / 负结果 / 术语表 |
 | 原理、推导与踩坑全过程 | `docs/log.md`（**过程日志**，23 章） | 按 §0 目录读；§20（四关键点与评测）、§21（负结果全录 + 交付对照）、§22（三重交叉验证）是本轮核心 |
@@ -868,9 +879,12 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 |---|---|
 | `detector:=pose` 报"需要 ONNX Runtime 后端" | 该构建未启用 ORT → 先 `sudo apt install ros-humble-onnxruntime-vendor`（或 `ORT_DIR=/你的/onnxruntime`），再 `bash scripts/setup.sh` 重建 |
 | `pip install onnxruntime` 装了，构建还是找不到 | 那是 **Python** 包（只给 python 用，不含 C++ 头文件、也没有可链接的 `.so`）→ C++ 要用 apt 的 `ros-humble-onnxruntime-vendor`，或发布页的 `onnxruntime-linux-x64-*.tgz` |
-| rqt 窗口打开了，但**一直没有图像** | 主节点已经退出（最常见原因就是上一条）。launch 里主节点现在是 `required=True`，**节点一挂 launch 会整体退出**并把 ERROR 打在终端；若仍看到空窗口，多半是上一次运行的 rqt 残留，关掉重开 |
+| rqt 窗口打开了，但**一直没有图像** | 主节点已经退出（最常见原因就是上一条）。launch 用 `RegisterEventHandler(OnProcessExit …) + Shutdown` 让**主节点一退出、launch 立即整体退出**并把 ERROR 打在终端（Humble 的 `Node` **没有** `required` 参数，所以是用事件处理器实现的）；若仍看到空窗口，多半是上一次运行的 rqt 残留，关掉重开 |
 | ORT 报 float16/float32 类型不匹配 | 用了 `convert_fp16_to_fp32.py` 的产物 → ORT 必须用**原始导出件** |
 | `source:=hik` 节点死掉，但 `ros2 launch` 看起来是成功的 | 无相机 / 序列号没填时节点 exit 255，**launch 进程本身仍返回 0** → 以节点日志为准 |
+| `source:=hik` 画面全空，日志刷 `不支持的像素格式 17301513` | `0x01080009 = BayerRG8`：原实现只认 `BGR8_Packed`/`Mono8` → 相机**每帧都被跳过**（节点还活着，所以 `ros2 launch` 看似正常）。已在 v3.17 支持七种格式；若仍出现，看是不是 `BayerRG10/12`（`adc_bit_depth` 未钉成 `Bits_8`） |
+| 海康画面**红蓝互换**（红装甲板看着是蓝的） | Bayer 相位取错：OpenCV 按图案"第二行第 2、3 个像素"命名，海康/GenICam 按"第一行前两个像素"命名，两边差一格 → `BayerRG8` 必须用 `COLOR_BayerBG2BGR`（写成同名的 `BayerRG2BGR` 就红蓝互换）。已修正并离线验证，见 log.md §19.10 |
+| 不想让本程序改动相机设置 | `data/camera.yaml` 的 `pixel_format` / `adc_bit_depth` / `trigger_mode` **留空 = 不调用 SDK**、用相机自己的默认值；`format` 是本工程自己的输出约定，不能留空 |
 | 编辑器里 `04_hik` 报找不到 `MvCameraControl.h`（01/02/03 却正常） | clangd **就近读第一个** `compile_commands.json` 且不合并：根目录那个是题3 的 DB（含 01/02/03，**不含** 04_hik）→ 跑 `bash scripts/setup.sh` 会自动在各工程目录建好软链；仍报错就删掉那一级的软链再重跑 |
 | 某条命令像卡住了，不结束 | 帧数参数传了非数字 → `atoi` 静默变 0 = 跑全片（只有 `armor_demo` 会报错） |
 | 改了 `03_visualization` 的源码，`ros2 run` 行为却没变 | `cmake --build` 不更新 `install/`；请用 `colcon build --packages-up-to rm_armor_visualization` |
@@ -942,6 +956,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | **v3.14** | 2026-09-12 | 按 clone 者反馈修订：① 「构建」与「04_hik」开头注明"**已跑过 `setup.sh` 可跳过**"；② 明确 `setup.sh` **也覆盖海康模块**（自动开 `USE_HIK_SDK` 并构建 `04_hik`，现场只需装 MVS + 填序列号）；③ **更正"真实相机"的表述**——验证用的是**手机 IP Webcam 对着笔记本屏幕回放 `demo.avi`**（二次成像），既不是真实场地/实车、也不是工业相机；标题与措辞统一改为「相机通路验证」；④ 题1 产物补"预览图开头几张可能没有目标"的说明；⑤ 「环境与依赖」里的自检指引收成一行 |
 | **v3.15** | 2026-09-12 | 新增 **`scripts/check_docs.sh` 文档自检脚本**（校验：代码栅栏配平 / 代码块内无尖括号占位符 / 修订记录版本号升序 / `§` 交叉引用有效 / 引用的仓库文件存在；退出码可判成败）—— 用历史上真实犯过的 4 类错误自测过，全部能被抓出；「目录结构」「文件清单」与「第二步」挂上入口 |
 | **v3.16** | 2026-09-12 | 修编辑器体验：`04_hik` 的源文件在 clangd 里报找不到 `MvCameraControl.h` —— 原因是 **clangd 只就近读一个 `compile_commands.json` 且不合并**，而根目录那个软链指向的是题3 的 DB（含 01/02/03、不含 04_hik）；`setup.sh` 现在会在 `./`、`01_detector/`、`02_tracker/`、`04_hik/` 各建一条软链指向对应构建目录，README「构建」与 FAQ 同步说明 |
+| **v3.17** | 2026-09-12 | **修"接上真机反而没画面"的致命问题**（真机实测反馈）：`source:=hik` 时相机输出 `BayerRG8`（`0x01080009`），而原实现只认 `BGR8_Packed`/`Mono8` → **每帧都被跳过**、画面全空（节点进程还活着，所以 `ros2 launch` 看似正常）。现在 ① 新增 `frameToBgr()` 统一转换七种格式（BGR8 / RGB8 / Mono8 / BayerRG8·GR8·GB8·BG8）；② `data/camera.yaml` 新增 `pixel_format` / `adc_bit_depth` / `trigger_mode` / `format` 四项（键名对齐战队自家项目 yaml；前三项以"请求"发给相机、不支持时只警告、**留空 = 不碰相机**）；③ 首帧打印相机实际输出格式、不支持的格式按帧计数提示。**顺带修正一个会让红蓝互换的坑**：OpenCV 与 GenICam 的 Bayer 命名错开一格（`BayerRG8` 必须用 `COLOR_BayerBG2BGR`），并用合成帧白盒测试（四种相位 × 四个转换码）验证，并与同济/武科大两个参考项目实际调用的枚举值（46）一致；FAQ / 相机通路 / 04_hik / 证据索引 / `notes.md` 踩坑表同步更新；另修正 FAQ 里"主节点 `required=True`"的过时表述（Humble 的 `Node` 无此参数，实际是用 `OnProcessExit + Shutdown` 实现） |
 
 ---
 
