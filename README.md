@@ -298,7 +298,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 
 | 程序 | 位置参数 | 默认值 |
 |---|---|---|
-| `armor_demo`、`corner_demo`、`pnp_demo`、`tracker_demo`、`lightbar_demo` | `<视频> [模型] [最大帧数]` | `data/demo.avi` / `models/armor_yolov8n.onnx` / `0`（=全部帧） |
+| `armor_demo`、`corner_demo`、`pnp_demo`、`tracker_demo`、`lightbar_demo` | `<视频> [模型] [最大帧数]`（**只用 bbox 检测器**，第四个及以后的参数被忽略） | `data/demo.avi` / `models/armor_yolov8n.onnx` / `0`（=全部帧） |
 | `projection_demo` | **不解析任何参数**（源码是 `int main()`，传参被忽略） | — |
 | `eval_demo` | `<视频> <模型> <最大帧数> <tag> <corner_mode> <detector>` | 同上 / `baseline` / `bbox` / `bbox` |
 | `hik_open` | `[序列号]` | `000000000000` |
@@ -318,6 +318,14 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 ---
 
 ## 题1：装甲板识别器（detector）
+
+> **先说清"哪里能用 pose"（如实说明）**
+> 本仓库的**学习阶段全程走 bbox 路线**——题1 的 `armor_demo`、题2 的 `corner_demo` / `pnp_demo` /
+> `tracker_demo` / `lightbar_demo` 都是那时写的，**它们只支持 bbox**。
+> **四关键点（pose）模型是最后优化阶段才引入的**，我没有回头改造这些教学 demo，所以 pose 只出现在两处：
+> ① **题3「ROS2 接入与可视化」的完整链路**（节点 / `launch`）；② **题2「离线评测基础设施（`eval_demo`）」**
+> ——可以指定 `detector=bbox|pose` 做两种检测器的 A/B 对比，**687 帧实测表就是它跑出来的**。
+> **想看 pose 的实际效果，直接跑「第三步：快速验证」的 ②。**
 
 两个检测器实现同一个概念接口（`detect(frame) -> 一组带 rect 的目标`），可按需切换、互不影响：
 
@@ -357,11 +365,14 @@ CPU 上用 OpenCV DNN 推理（**无需 onnxruntime、无需 GPU**）。
 阈值可在代码里调：`01_detector/include/armor_detector/armor_detector.hpp` 的
 `setConfidenceThreshold` / `setNmsThreshold`（本工程用 0.35 / 0.45）。
 
-#### 快速验证
+#### 快速验证（bbox）
 
 ```bash
 ./build/01_detector/armor_demo data/demo.avi models/armor_yolov8n.onnx 240
 ```
+
+> `armor_demo` **只支持 bbox**（第 4 个及以后的参数会被忽略）。想看 pose，走「第三步：快速验证」的 ②，
+> 或用**题2 的「离线评测基础设施（`eval_demo`）」**跑 `detector=pose` 做 A/B。
 
 约 15 s，预期末尾输出：
 
@@ -417,7 +428,9 @@ CPU 上用 OpenCV DNN 推理（**无需 onnxruntime、无需 GPU**）。
   `01_detector/scripts/convert_fp16_to_fp32.py` 的产物只适用于 cv2.dnn。
   未启用 ORT 的构建若被要求 `detector:=pose`，会在构造检测器时**明确抛异常并提示重新构建**（exit 255），不会静默失效。
 
-运行方式见「题3 → 检测器选择」；A/B 量化对比见「题2 → 687 帧实测」。
+**本类没有独立的命令行演示程序**（题1/题2 里的 `*_demo` 都是学习阶段的 bbox 演示）。pose 可用于两处：
+**题3「ROS2 接入与可视化」的完整链路（节点 / launch）**，以及**题2 的「离线评测基础设施（`eval_demo`）」**——
+后者用 `detector=pose` 就能做 A/B，量化结果见「题2 → 687 帧实测」。
 
 ---
 
@@ -462,6 +475,10 @@ bbox/关键点 → 2D 点(4) → PnP → 板心 3D 位置 → 卡尔曼滤波 �
 
 ### 快速验证
 
+> 下面 **1)、2) 用的是 bbox**（`pnp_demo` / `tracker_demo` 是学习阶段的演示，只支持 bbox）；
+> **3) 用的是本节的「离线评测基础设施（`eval_demo`）」——它两种检测器都支持**（第 6 个参数 `bbox|pose`），
+> 本工程所有 A/B 结论都出自它。
+
 ```bash
 # 1) PnP 解算正确性（合成闭环，误差应≈0）
 ./build/02_tracker/pnp_demo data/demo.avi models/armor_yolov8n.onnx 120
@@ -483,8 +500,9 @@ python3 02_tracker/scripts/compare_eval.py baseline pose
 #   —— 与本文件「687 帧实测」表逐项一致；对不上先看是不是没跑满 687 帧（第 3 个参数为 0）
 ```
 
-第 3 条的第 2 行需要 ONNX Runtime 构建（「构建 C」）。想先快速试可以只跑 60 帧（把 `0` 换成 `60`），
-但那样数字自然会和 687 帧的表不同。
+第 3 条的第 2 行（pose）**要求构建时启用 ONNX Runtime**：用 `bash scripts/setup.sh` 构建会自动探测并启用
+（见「第二步」）；若它打印 `USE_ONNXRUNTIME:BOOL=OFF`，先按「第三步 ② 的前置」装好 ORT 再重跑一次 `setup.sh`。
+想先快速试可以只跑 60 帧（把 `0` 换成 `60`），但那样数字自然会和 687 帧的表不同。
 
 ### 产物
 
@@ -886,6 +904,8 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | **v3.8** | 2026-09-11 | 顶部重排为**三步**（clone → 环境配置 → 快速验证）消除原「快速开始/快速验证」的重合；新增 **`scripts/check_env.sh` 环境自检脚本**（逐项检查系统/工具链/ROS2 与所需包/colcon/OpenCV/可选 ORT 与 MVS SDK/仓库素材，缺失项直接给出安装命令，退出码可判成败）；「环境与依赖」补指向自检的入口 |
 | **v3.9** | 2026-09-11 | 顶部与文末新增「**代码来源与用途声明**」：明确**代码实现由 AI 工具 DSH 生成**，本人负责需求拆解/技术路线与取舍/代码审查与修改意见/验收纠错/笔记组织，**仅作学习记录、未经生产验证**；`log.md` 与 `notes.md` 顶部同步加精简声明；同时撤回上一版试做的阅读状态标注 |
 | **v3.10** | 2026-09-12 | 修"干净环境跑 pose 失败"的体验问题：① `scripts/setup.sh` / `check_env.sh` 的 ONNX Runtime 探测扩到多个候选路径（含仓库上两级、`/opt`、`/usr/local`、`$HOME`），未找到时明确提示用 `ORT_DIR=…` 重跑，并警告不启用 ORT 时 pose 会直接报错；② launch 用 **`RegisterEventHandler(OnProcessExit …) + Shutdown`** 实现"主节点一退出、launch 立即整体退出"（试过 `Node(required=True)`，但 **Humble 不支持该参数**），不再留一个空 rqt 窗口；③ 「快速验证」把"pose 需要 ONNX Runtime"提为**显式前置**，并给出下载/解压/重构建的四行命令；④ FAQ 新增"窗口打开了但没有图像"一条 |
+| **v3.13** | 2026-09-12 | 修 `scripts/setup.sh`：**ORT 开关此前只传给题3 的 colcon，没给题1/题2 的普通 CMake** —— 实测这会让 clone 者编出的 `build/02_tracker/eval_demo` 是 `USE_ONNXRUNTIME=OFF`，于是 README 题2 快速验证第 3 条（复现 687 帧 A/B 表）直接抛异常；现改为 ORT 开关同时传给 01/02 的 `cmake -S`（探不到 ORT 时不加，行为不变）。顺带把"pose 可用于哪里"的措辞统一为：**题3 完整链路 + 题2 的离线评测基础设施 `eval_demo`** |
+| **v3.12** | 2026-09-12 | 明确"哪里能用 pose"：题1/题2 的 `armor_demo` / `corner_demo` / `pnp_demo` / `tracker_demo` / `lightbar_demo` **都只支持 bbox**（学习阶段就是按 bbox 走的）；**pose 是最后优化阶段引入的**，只用于**题3 的完整链路**与**题2 的评测工具 `eval_demo`** —— 在题1 开头、两题的「快速验证」与「命令行通用约定」表里都写清楚（曾尝试给这些 demo 加 `detector` 参数，评估后**放弃并回档**，避免改动稳定代码） |
 | **v3.11** | 2026-09-12 | 让"clone 者照 README 复制粘贴"就能看到效果：ONNX Runtime 探测新增 **ROS 官方 vendor 包路径**（`/opt/ros/$ROS_DISTRO/opt/onnxruntime_vendor`，实测可直接当 `ORT_DIR` 用）与 `third_party/onnxruntime`；未找到时提示改为**首选 `apt install ros-humble-onnxruntime-vendor`**、备选下载解压；「快速验证」改为**先跑零依赖的 ①（bbox）、再按需升级 ②（pose）**；FAQ 补 `pip install onnxruntime` 混淆一条；顶部注明"不装 ORT 也能完整跑通三题" |
 
 ---

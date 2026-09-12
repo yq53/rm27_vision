@@ -47,7 +47,11 @@ if [[ "$RMW_IMPLEMENTATION" != "rmw_fastrtps_cpp" ]]; then
 fi
 
 # ---------- 2) 探测可选依赖 ----------
+# CMAKE_ARGS：给 colcon（题3 的 ROS 包）；PLAIN_ARGS：给题1/题2 的普通 CMake 工程。
+# 两边都要带 ORT 开关：题2 的 eval_demo（离线评测基础设施）用 pose 跑 A/B，靠的就是这个开关；
+# 只给 colcon 的话，clone 者编出来的 eval_demo 会在 detector=pose 时直接抛异常。
 CMAKE_ARGS=()
+PLAIN_ARGS=()
 
 # 在多个常见位置找 ONNX Runtime（解压即用的目录，特征文件是 include/onnxruntime_cxx_api.h）
 if [[ -z "${ORT_DIR:-}" ]]; then
@@ -65,6 +69,7 @@ fi
 if [[ -n "${ORT_DIR:-}" && -f "$ORT_DIR/include/onnxruntime_cxx_api.h" ]]; then
     echo "[setup] 检测到 ONNX Runtime：$ORT_DIR  → 启用四关键点检测器（detector:=pose）"
     CMAKE_ARGS+=(-DUSE_ONNXRUNTIME=ON "-DONNXRUNTIME_DIR=$ORT_DIR")
+    PLAIN_ARGS+=(-DUSE_ONNXRUNTIME=ON "-DONNXRUNTIME_DIR=$ORT_DIR")
 else
     echo "[setup] 未检测到 ONNX Runtime → 只构建 bbox 通路（detector:=pose 将不可用）"
     echo "        · 首选（装了 ROS2 就有源，一条命令）："
@@ -88,11 +93,11 @@ fi
 
 JOBS="$(nproc)"
 echo "[setup] 构建题1（01_detector）…"
-cmake -S 01_detector -B build/01_detector -DCMAKE_BUILD_TYPE=Release
+cmake -S 01_detector -B build/01_detector -DCMAKE_BUILD_TYPE=Release "${PLAIN_ARGS[@]}"
 cmake --build build/01_detector -j"$JOBS"
 
 echo "[setup] 构建题2（02_tracker）…"
-cmake -S 02_tracker -B build/02_tracker -DCMAKE_BUILD_TYPE=Release
+cmake -S 02_tracker -B build/02_tracker -DCMAKE_BUILD_TYPE=Release "${PLAIN_ARGS[@]}"
 cmake --build build/02_tracker -j"$JOBS"
 
 echo "[setup] 构建题3（ROS2 包 rm_armor_visualization）…"

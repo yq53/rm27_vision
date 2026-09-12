@@ -1336,6 +1336,8 @@ v2：框内**灯条精定位**（灯条端点 → 更准的四角点 → PnP 更
 | 源文件角色标签（核心 / 工具 / 教学 / 负结果） | ✅「文件清单」 | ✅ 本节 |
 | **文档分层**：本文件改名 `log.md`（过程日志）+ 新建 `notes.md`（主题归纳） | ✅ README 顶部与「证据与复现索引」均有入口 | ✅ 本节 |
 | **`scripts/check_env.sh` 环境自检脚本**（逐项检查依赖、缺失项给安装命令、退出码可判成败）；README 顶部重排为三步（clone → 环境配置 → 快速验证） | ✅「第一步/第二步/第三步」 | ✅ 本节 |
+| **修 `setup.sh` 的 ORT 开关传递**（2026-09-12）：实测发现 clone 者的 `build/02_tracker/eval_demo` 是 `USE_ONNXRUNTIME=OFF`（开关只传给了 colcon），**README 题2 快速验证第 3 条（复现 687 帧 A/B 表）会直接抛异常**；改为 ORT 开关同时传给 01/02 的普通 `cmake -S`（探不到就不加，行为不变） | ✅ README v3.13 / `scripts/setup.sh` | ✅ 本节 |
+| **"给题1/题2 的 demo 加 pose 通路"的评估与放弃**（2026-09-12）：先试了给 `armor_demo` / `tracker_demo` 加第 4 个参数 `[detector]`（顺带发现 `setup.sh` 只把 ORT 开关传给 colcon，**没传给 01/02 的普通 CMake**，所以这两个 demo 编不出 pose）；权衡后**决定不改动稳定的教学代码，全部回档**（`git checkout --` 5 个文件，重建冒烟通过），改为在 README / notes 里如实注明：**题1/题2 的命令行 demo 只支持 bbox（学习阶段就是 bbox 路线），pose 只用于题3 完整链路与 `eval_demo`** | ✅ README v3.12 / notes §3 | ✅ 本节 |
 | **"clone 者照 README 复制粘贴能否看到效果"的端到端验证**（2026-09-12）：在模拟干净机器（深层目录，所有 ORT 候选都落空）里逐步跑 README —— ① bbox 零依赖可用；② pose 在没装 ORT 时 **1 秒内明确报错并整体退出**（不再留空窗口）。**用户随后在自己机器上 `sudo apt install ros-humble-onnxruntime-vendor` 实测：pose 检测视频跑通**；再在干净克隆里复验 `setup.sh` **零配置自动探测**到 `/opt/ros/humble/opt/onnxruntime_vendor`（`USE_ONNXRUNTIME:BOOL=ON`）→ ② 直接可用。据此把 ORT 的推荐获取方式定为 **apt vendor 包优先**，README 改为"先跑 ①、再按需升级 ②" | ✅ README v3.11 / 第三步 | ✅ 本节 |
 | **修"干净环境跑 pose 失败"的体验问题**（2026-09-12，由用户在新副本实测发现）：ORT 探测扩到 7 个候选路径、未找到时提示用 `ORT_DIR=` 重跑；launch 用 `OnProcessExit + Shutdown` 让"主节点退出即整体退出"（`Node` 在 Humble 不支持 `required`）；README 把"pose 需要 ORT"提为显式前置 + 补 FAQ | ✅ 第三步前置条件 / FAQ / v3.10 | ✅ 本节 |
 | 「快速开始」（只引导到题3）+ 顶部「快速验证（题3：demo 视频 / 海康相机 × bbox / pose）」+ 各题自己的预期效果 | ✅ | ✅ 本节 |
