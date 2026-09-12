@@ -884,9 +884,9 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | **v3.6** | 2026-09-11 | 如实标注模型强弱：说明 **bbox 模型是本仓库自训（训练量小、效果一般）**，**推荐使用深大 26 开源的 pose 模型**并标注其来源；新增文末 **「参考仓库与教程」**（10 条带链接，首位即深大 RobotPilots 的模型开源帖） |
 | **v3.7** | 2026-09-11 | 文档分层：原 `docs/notes.md` 整体改名为 **`docs/log.md`（过程日志，内容与章号一字不改）**；新建 **`docs/notes.md`（按主题归纳的总结，9 节，每条结论标注 `log.md §` 出处）**；README 中原先指向"过程/证据"的引用统一改指 `log.md`，并新增指向归纳笔记的入口；完成 README ↔ notes ↔ log 三重交叉验证 |
 | **v3.8** | 2026-09-11 | 顶部重排为**三步**（clone → 环境配置 → 快速验证）消除原「快速开始/快速验证」的重合；新增 **`scripts/check_env.sh` 环境自检脚本**（逐项检查系统/工具链/ROS2 与所需包/colcon/OpenCV/可选 ORT 与 MVS SDK/仓库素材，缺失项直接给出安装命令，退出码可判成败）；「环境与依赖」补指向自检的入口 |
-| **v3.11** | 2026-09-12 | 让"clone 者照 README 复制粘贴"就能看到效果：ONNX Runtime 探测新增 **ROS 官方 vendor 包路径**（`/opt/ros/$ROS_DISTRO/opt/onnxruntime_vendor`，实测可直接当 `ORT_DIR` 用）与 `third_party/onnxruntime`；未找到时提示改为**首选 `apt install ros-humble-onnxruntime-vendor`**、备选下载解压；「快速验证」改为**先跑零依赖的 ①（bbox）、再按需升级 ②（pose）**；FAQ 补 `pip install onnxruntime` 混淆一条；顶部注明"不装 ORT 也能完整跑通三题" |
-| **v3.10** | 2026-09-12 | 修"干净环境跑 pose 失败"的体验问题：① `scripts/setup.sh` / `check_env.sh` 的 ONNX Runtime 探测扩到 7 个候选路径（含仓库上两级、`/opt`、`/usr/local`、`$HOME`），未找到时明确提示用 `ORT_DIR=…` 重跑，并警告不启用 ORT 时 pose 会直接报错；② launch 里主节点改为 **`required=True`**——节点一退出整个 launch 立即退出，不再留一个空 rqt 窗口；③ 「快速验证」把"pose 需要 ONNX Runtime"提为**显式前置**，并给出下载/解压/重构建的四行命令；④ FAQ 新增"窗口打开了但没有图像"一条 |
 | **v3.9** | 2026-09-11 | 顶部与文末新增「**代码来源与用途声明**」：明确**代码实现由 AI 工具 DSH 生成**，本人负责需求拆解/技术路线与取舍/代码审查与修改意见/验收纠错/笔记组织，**仅作学习记录、未经生产验证**；`log.md` 与 `notes.md` 顶部同步加精简声明；同时撤回上一版试做的阅读状态标注 |
+| **v3.10** | 2026-09-12 | 修"干净环境跑 pose 失败"的体验问题：① `scripts/setup.sh` / `check_env.sh` 的 ONNX Runtime 探测扩到多个候选路径（含仓库上两级、`/opt`、`/usr/local`、`$HOME`），未找到时明确提示用 `ORT_DIR=…` 重跑，并警告不启用 ORT 时 pose 会直接报错；② launch 用 **`RegisterEventHandler(OnProcessExit …) + Shutdown`** 实现"主节点一退出、launch 立即整体退出"（试过 `Node(required=True)`，但 **Humble 不支持该参数**），不再留一个空 rqt 窗口；③ 「快速验证」把"pose 需要 ONNX Runtime"提为**显式前置**，并给出下载/解压/重构建的四行命令；④ FAQ 新增"窗口打开了但没有图像"一条 |
+| **v3.11** | 2026-09-12 | 让"clone 者照 README 复制粘贴"就能看到效果：ONNX Runtime 探测新增 **ROS 官方 vendor 包路径**（`/opt/ros/$ROS_DISTRO/opt/onnxruntime_vendor`，实测可直接当 `ORT_DIR` 用）与 `third_party/onnxruntime`；未找到时提示改为**首选 `apt install ros-humble-onnxruntime-vendor`**、备选下载解压；「快速验证」改为**先跑零依赖的 ①（bbox）、再按需升级 ②（pose）**；FAQ 补 `pip install onnxruntime` 混淆一条；顶部注明"不装 ORT 也能完整跑通三题" |
 
 ---
 
