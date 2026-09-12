@@ -300,6 +300,10 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 ```
 
 - 02_tracker / 03_visualization 通过 `add_subdirectory` 内部复用 `01_detector`，无需单独安装。
+- **编辑器（VS Code + clangd）**：四个工程是各自独立构建的，而 clangd **只从源文件往上找第一个** `compile_commands.json`、
+  **不会合并多个** —— 所以每个工程目录下都要能就近找到一个。`setup.sh` 会自动建好这四条软链
+  （`./`、`01_detector/`、`02_tracker/`、`04_hik/` → 各自 `build/*/compile_commands.json`，都在 `.gitignore` 里）；
+  手工构建的话自己补一条，例如 `ln -sfn ../build/04_hik/compile_commands.json 04_hik/compile_commands.json`。
 - ⚠️ **`ros2 run` 执行的是 `install/` 里的副本**：只对 `03_visualization` 源码跑 `cmake --build build/rm_armor_visualization`
   不会更新它，必须 `colcon build`（会带上 install 步骤）。否则你会觉得"代码改了但行为没变"。
 - C 与 D 可同时给（同一行写两个 `-D`）；两个开关都是 CMake `option()`、默认 OFF——
@@ -867,6 +871,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | rqt 窗口打开了，但**一直没有图像** | 主节点已经退出（最常见原因就是上一条）。launch 里主节点现在是 `required=True`，**节点一挂 launch 会整体退出**并把 ERROR 打在终端；若仍看到空窗口，多半是上一次运行的 rqt 残留，关掉重开 |
 | ORT 报 float16/float32 类型不匹配 | 用了 `convert_fp16_to_fp32.py` 的产物 → ORT 必须用**原始导出件** |
 | `source:=hik` 节点死掉，但 `ros2 launch` 看起来是成功的 | 无相机 / 序列号没填时节点 exit 255，**launch 进程本身仍返回 0** → 以节点日志为准 |
+| 编辑器里 `04_hik` 报找不到 `MvCameraControl.h`（01/02/03 却正常） | clangd **就近读第一个** `compile_commands.json` 且不合并：根目录那个是题3 的 DB（含 01/02/03，**不含** 04_hik）→ 跑 `bash scripts/setup.sh` 会自动在各工程目录建好软链；仍报错就删掉那一级的软链再重跑 |
 | 某条命令像卡住了，不结束 | 帧数参数传了非数字 → `atoi` 静默变 0 = 跑全片（只有 `armor_demo` 会报错） |
 | 改了 `03_visualization` 的源码，`ros2 run` 行为却没变 | `cmake --build` 不更新 `install/`；请用 `colcon build --packages-up-to rm_armor_visualization` |
 | 订阅 `/armor/annotated` 收不到消息 | 该话题用的是 **SensorDataQoS（BEST_EFFORT）**：自写订阅者要用 `qos_profile_sensor_data`（Python）或 `rclcpp::SensorDataQoS()`；`ros2 topic echo` 需加 `--qos-reliability best_effort` |
@@ -936,6 +941,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | **v3.13** | 2026-09-12 | 修 `scripts/setup.sh`：**ORT 开关此前只传给题3 的 colcon，没给题1/题2 的普通 CMake** —— 实测这会让 clone 者编出的 `build/02_tracker/eval_demo` 是 `USE_ONNXRUNTIME=OFF`，于是 README 题2 快速验证第 3 条（复现 687 帧 A/B 表）直接抛异常；现改为 ORT 开关同时传给 01/02 的 `cmake -S`（探不到 ORT 时不加，行为不变）。顺带把"pose 可用于哪里"的措辞统一为：**题3 完整链路 + 题2 的离线评测基础设施 `eval_demo`** |
 | **v3.14** | 2026-09-12 | 按 clone 者反馈修订：① 「构建」与「04_hik」开头注明"**已跑过 `setup.sh` 可跳过**"；② 明确 `setup.sh` **也覆盖海康模块**（自动开 `USE_HIK_SDK` 并构建 `04_hik`，现场只需装 MVS + 填序列号）；③ **更正"真实相机"的表述**——验证用的是**手机 IP Webcam 对着笔记本屏幕回放 `demo.avi`**（二次成像），既不是真实场地/实车、也不是工业相机；标题与措辞统一改为「相机通路验证」；④ 题1 产物补"预览图开头几张可能没有目标"的说明；⑤ 「环境与依赖」里的自检指引收成一行 |
 | **v3.15** | 2026-09-12 | 新增 **`scripts/check_docs.sh` 文档自检脚本**（校验：代码栅栏配平 / 代码块内无尖括号占位符 / 修订记录版本号升序 / `§` 交叉引用有效 / 引用的仓库文件存在；退出码可判成败）—— 用历史上真实犯过的 4 类错误自测过，全部能被抓出；「目录结构」「文件清单」与「第二步」挂上入口 |
+| **v3.16** | 2026-09-12 | 修编辑器体验：`04_hik` 的源文件在 clangd 里报找不到 `MvCameraControl.h` —— 原因是 **clangd 只就近读一个 `compile_commands.json` 且不合并**，而根目录那个软链指向的是题3 的 DB（含 01/02/03、不含 04_hik）；`setup.sh` 现在会在 `./`、`01_detector/`、`02_tracker/`、`04_hik/` 各建一条软链指向对应构建目录，README「构建」与 FAQ 同步说明 |
 
 ---
 

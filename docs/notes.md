@@ -127,6 +127,7 @@
 | 设了 `RM_CORNER_DEBUG=0` 也落盘调试图 | 源码判断是 `getenv() != nullptr`，**传任意值都触发** | 本轮实测（README） |
 | `scripts/setup.sh` 探不到 ONNX Runtime | 用 `ORT_DIR=/你的/onnxruntime bash scripts/setup.sh` 指定 | `README.md`「第二步：环境配置」 |
 | 想让"主节点退出 ⇒ launch 一起退出" | Humble 的 `Node` **不支持** `required=True`（会报 `unexpected keyword argument 'required'`）；要用 `RegisterEventHandler(OnProcessExit(target_action=节点, on_exit=[EmitEvent(event=Shutdown())]))` | 本轮实测（`armor_tracker.launch.py`） |
+| 编辑器里 `04_hik` 报找不到 `MvCameraControl.h` | **clangd 只从源文件往上找第一个 `compile_commands.json`，且不合并多个**：根目录那个是题3 的 DB（题3 通过 `add_subdirectory` 带了 01/02，所以它们正常；04_hik 是独立工程，不在里面）→ 在每个工程目录下各放一条软链（`setup.sh` 已自动做） | `README.md`「构建」/ FAQ |
 | rqt 窗口开了但**一直没有图像** | 主节点已退出。launch 现在会跟着退出并打印"[armor_tracker.launch] 主节点已退出…"提示；最常见原因是 `detector:=pose` 但构建未启用 ONNX Runtime（用 `ORT_DIR=… bash scripts/setup.sh` 重建），或视频/模型/相机路径不对 | `README.md`「第三步」前置条件与 FAQ |
 | 想启用 pose（要装 ONNX Runtime） | **首选** `sudo apt install ros-humble-onnxruntime-vendor`（ROS2 软件源里就有；**真机实测**：装完 `setup.sh` 零配置自动探测到，② 直接可用）；**备选** 下载 `onnxruntime-linux-x64-*.tgz` 解压后 `ORT_DIR=… bash scripts/setup.sh`。⚠️ `pip install onnxruntime` 是 **Python** 包，C++ 链接不了 | `README.md` 第二步 2.1 / 第三步 ② |
 | 不确定这台机器缺什么依赖 | 跑 `bash scripts/check_env.sh`：逐项自检（系统/工具链/ROS2 与所需包/colcon/OpenCV/可选 ORT 与 MVS/素材），缺失项直接给安装命令，退出码 0=齐全、1=有缺失 | `README.md`「第二步：环境配置」 |

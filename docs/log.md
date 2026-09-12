@@ -1336,6 +1336,7 @@ v2：框内**灯条精定位**（灯条端点 → 更准的四角点 → PnP 更
 | 源文件角色标签（核心 / 工具 / 教学 / 负结果） | ✅「文件清单」 | ✅ 本节 |
 | **文档分层**：本文件改名 `log.md`（过程日志）+ 新建 `notes.md`（主题归纳） | ✅ README 顶部与「证据与复现索引」均有入口 | ✅ 本节 |
 | **`scripts/check_env.sh` 环境自检脚本**（逐项检查依赖、缺失项给安装命令、退出码可判成败）；README 顶部重排为三步（clone → 环境配置 → 快速验证） | ✅「第一步/第二步/第三步」 | ✅ 本节 |
+| **修 clangd 读不到 04_hik 编译参数的问题**（2026-09-12，用户报）：现象是 04 的源文件报 `MvCameraControl.h` 找不到，而 01/02/03 正常。根因：`04_hik/build/compile_commands.json` 其实**生成正确**（带 `-I/opt/MVS/include`），但 **clangd 只就近读一个 DB 且不合并**，而根目录的软链指向题3 的 DB（含 01/02/03）——`04_hik/` 下没有 DB，于是退回默认参数、丢了 MVS 头文件路径。修法：`setup.sh` 在 `./`、`01_detector/`、`02_tracker/`、`04_hik/` 各建软链 | ✅ README v3.16 / `scripts/setup.sh` | ✅ 本节 |
 | **新增 `scripts/check_docs.sh` 文档自检**（2026-09-12）：把"文档规范"变成可执行的——校验代码栅栏配平、代码块内无尖括号占位符、修订记录版本号升序、`§` 交叉引用与文件路径引用有效。起因是修订记录版本顺序被**连续写反两次**、尖括号占位符也曾导致粘贴报错；脚本用这 4 类历史错误自测过 | ✅ README v3.15 / `scripts/check_docs.sh` | ✅ 本节 |
 | **修 `setup.sh` 的 ORT 开关传递**（2026-09-12）：实测发现 clone 者的 `build/02_tracker/eval_demo` 是 `USE_ONNXRUNTIME=OFF`（开关只传给了 colcon），**README 题2 快速验证第 3 条（复现 687 帧 A/B 表）会直接抛异常**；改为 ORT 开关同时传给 01/02 的普通 `cmake -S`（探不到就不加，行为不变） | ✅ README v3.13 / `scripts/setup.sh` | ✅ 本节 |
 | **"给题1/题2 的 demo 加 pose 通路"的评估与放弃**（2026-09-12）：先试了给 `armor_demo` / `tracker_demo` 加第 4 个参数 `[detector]`（顺带发现 `setup.sh` 只把 ORT 开关传给 colcon，**没传给 01/02 的普通 CMake**，所以这两个 demo 编不出 pose）；权衡后**决定不改动稳定的教学代码，全部回档**（`git checkout --` 5 个文件，重建冒烟通过），改为在 README / notes 里如实注明：**题1/题2 的命令行 demo 只支持 bbox（学习阶段就是 bbox 路线），pose 只用于题3 完整链路与 `eval_demo`** | ✅ README v3.12 / notes §3 | ✅ 本节 |

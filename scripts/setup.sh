@@ -113,7 +113,19 @@ if [[ -f /opt/MVS/include/MvCameraControl.h ]]; then
     cmake --build build/04_hik -j"$JOBS"
 fi
 
-# ---------- 4) 收尾：只提示，不启动 ----------
+# ---------- 4) 给编辑器（clangd）准备 compile_commands.json ----------
+# 原理：clangd 是"从源文件所在目录逐级往上找，用找到的第一个 compile_commands.json"，而且**不会合并多个**。
+# 四个工程是各自独立构建的，所以每个目录都要能就近找到一个（这些软链都在 .gitignore 里，不会被提交）。
+echo "[setup] 为编辑器准备 compile_commands.json 软链（clangd 只就近读一个且不合并）…"
+ln -sfn "build/rm_armor_visualization/compile_commands.json" compile_commands.json
+ln -sfn "../build/01_detector/compile_commands.json" 01_detector/compile_commands.json
+ln -sfn "../build/02_tracker/compile_commands.json" 02_tracker/compile_commands.json
+if [[ -f build/04_hik/compile_commands.json ]]; then
+    ln -sfn "../build/04_hik/compile_commands.json" 04_hik/compile_commands.json
+fi
+ls -l compile_commands.json 01_detector/compile_commands.json 02_tracker/compile_commands.json 04_hik/compile_commands.json 2>/dev/null | sed 's/^/        /' || true
+
+# ---------- 5) 收尾：只提示，不启动 ----------
 source install/setup.bash
 echo
 echo "[setup] 构建完成，开关状态："
@@ -133,4 +145,7 @@ echo "      detector:=pose \\"
 echo "      pose_model_path:=models/third_party/Infantry-v8n/Infantry-v8n-fp16-20260726-D1.8w-B16.onnx \\"
 echo "      use_rqt:=true"
 echo
-echo "  # 手机/海康相机：见 README「题3 → 真实相机」"
+echo "  # 手机/海康相机：见 README「题3 → 相机通路」"
+echo
+echo "[setup] 编辑器（VS Code + clangd）现在应能正常解析所有源文件；"
+echo "        若仍报找不到头文件（如 MvCameraControl.h），删掉那一级目录的 compile_commands.json 软链后重跑本脚本。"
