@@ -7,7 +7,7 @@
 > - **本仓库是本人的学习记录**：完整复盘"一个自瞄项目如何被拆解、实现、评测与推翻"，包含我走过的弯路与
 >   两次主动放弃的方向。它**未经生产环境验证**，复用前请自行验证；本人对算法与工程的理解见 `docs/log.md`。
 
-视觉方向三小题的完整实现：**装甲板识别（detector）→ 装甲板跟踪（tracker）→ 接入真实相机 + 可视化**。
+视觉方向三小题的完整实现：**装甲板识别（detector）→ 装甲板跟踪（tracker）→ 接入相机 + 可视化**。
 按题分目录组织，每部分可独立构建、运行、复现；学习过程、原理问答、踩坑与负结果的完整记录见
 `docs/log.md`（过程日志，23 章：问答/推导/踩坑/负结果原文）+ `docs/notes.md`（按主题归纳的速查总结）。
 
@@ -22,7 +22,7 @@
 ## 第一步：clone
 
 ```bash
-git clone https://github.com/your-name/rm27_vision.git    # ← 换成你自己的仓库地址
+git clone https://github.com/yq53/rm27_vision.git  
 cd rm27_vision
 ```
 
@@ -74,6 +74,11 @@ bash scripts/setup.sh
 | `bash scripts/setup.sh --clean` | 先删 `build/ install/ log/` 再全量重建 |
 
 > 不想用脚本也行：手工命令见「构建」一节，效果完全一样。**脚本只做"环境 + 构建"，不启动任何程序。**
+
+**海康相机模块也在覆盖范围内**：检测到 `/opt/MVS` 时，`setup.sh` 会
+①给出题3 的节点打开 `USE_HIK_SDK`（也就是 `source:=hik` 图像源）、②顺带构建 `04_hik` 学习 demo。
+所以现场接入海康相机只需三步：**装 MVS 客户端（含 SDK）→ `data/camera.yaml` 填序列号 → `ros2 launch … source:=hik`**。
+（没装 MVS SDK 时这两步会自动跳过，`check_env.sh` 会在 [5/6] 明确提示。）
 
 ## 第三步：快速验证（题3：两种素材 × 两种检测器）
 
@@ -166,7 +171,7 @@ ros2 launch rm_armor_visualization armor_tracker.launch.py source:=hik \
 |---|---|---|---|---|
 | 题1 detector | 识别装甲板；传统视觉或神经网络方案均可，不要求高鲁棒性 | `01_detector/`：自训 YOLOv8n bbox 检测器（默认，效果一般）+ 深大 26 开源的**四关键点检测器（推荐）**，两种实现同一接口 | ✅ | 687 帧检出 **72.49%（bbox）/ 90.25%（关键点）**；`docs/screenshots/` |
 | 题2 tracker | 单板跟踪或整车估计；PnP+EKF、ESEKF、MCSKF、因子图等后端不限 | `02_tracker/`：PnP（IPPE 多解 + 破镜像 + 双重闸门）+ 常速卡尔曼；另附离线评测基础设施 | ✅ | 687 帧 A/B 表（本文件）+ `compare_eval.py` 一键复算 |
-| 题3 接入与可视化 | 做到可接入**仿真、真实相机**验证算法，并有可视化界面展示（OpenGL/QT/GTK、web、foxglove、rerun 等） | `03_visualization/` + `rm_interfaces/`：图像源抽象（视频 / 网络流 / 海康工业相机）+ 完整链路 ROS2 节点 + 自定义状态话题 + rqt 2D 标注 | ✅（走通**真实相机**路线，未接仿真器） | `results/real_camera_2026-09-09.mkv`、`docs/screenshots/phone_rqt.png` |
+| 题3 接入与可视化 | 做到可接入**仿真、真实相机**验证算法，并有可视化界面展示（OpenGL/QT/GTK、web、foxglove、rerun 等） | `03_visualization/` + `rm_interfaces/`：图像源抽象（视频 / 网络流 / 海康工业相机）+ 完整链路 ROS2 节点 + 自定义状态话题 + rqt 2D 标注 | ✅（**相机通路已跑通**：手机 IP Webcam 网络流；无工业相机，未接仿真器） | `results/real_camera_2026-09-09.mkv`（手机对屏回放）、`docs/screenshots/phone_rqt.png` |
 | 导航方向 | 运动控制 / A-B / 路径规划 共 4 小题 | 未做（题面注明视觉与导航方向不强求全部完成；本仓库聚焦视觉方向） | — | — |
 
 > 三题通过同一套「2D 点 → PnP → EKF」主链路串起来：题1 决定 2D 点从哪来，题2 决定怎么解与怎么平滑，
@@ -204,8 +209,8 @@ rm27_vision/
 ├── docs/
 │   ├── notes.md               # 主题归纳（架构/常数/口径/踩坑速查/术语，每条结论标 log 出处）
 │   ├── log.md                 # 过程日志（23 章）：概念问答、推导、踩坑、负结果原始记录
-│   └── screenshots/           # 运行效果截图（题1 预览 + 题3 真实相机证据）
-└── results/                   # 运行输出（生成物不入库；唯一入库的证据录屏 real_camera_2026-09-09.mkv）
+│   └── screenshots/           # 运行效果截图（题1 预览 + 题3 相机通路证据）
+└── results/                   # 运行输出（生成物不入库；唯一入库的证据录屏 real_camera_2026-09-09.mkv = 手机对屏回放）
 ```
 
 ## 文件清单：核心 / 工具 / 教学
@@ -225,8 +230,8 @@ rm27_vision/
 
 ## 环境与依赖
 
-> **缺依赖怎么装**：直接跑 `bash scripts/check_env.sh`，它会逐项检查并打印可复制的安装命令；
-> 常见缺失的汇总表见上面「第二步：环境配置」。
+> **要装依赖 / 自检**：见「第二步：环境配置」——一条 `bash scripts/check_env.sh` 会逐项检查并打印安装命令。
+> 本节只回答"需要什么"。
 
 **必备**
 
@@ -261,6 +266,10 @@ rm27_vision/
 - ⚠️ 本文档命令里的路径 / IP **请替换成你自己的**。不要粘贴带尖括号的占位符（bash 会把 `<` 当输入重定向）。
 
 ## 构建
+
+> **已经跑过 `bash scripts/setup.sh` 的话，本节可以跳过** —— 脚本做的就是下面这些，而且会**自动探测可选依赖**
+> （ONNX Runtime / MVS SDK）、把开关传给三个题、最后打印开关状态与下一步命令。
+> 本节保留给想手工一步步来、或需要自定义构建目录的场合。
 
 ```bash
 # A. 题1 / 题2：普通 CMake，只需 OpenCV
@@ -387,6 +396,9 @@ CPU 上用 OpenCV DNN 推理（**无需 onnxruntime、无需 GPU**）。
 #### 产物
 
 `results/detector_demo.avi`（标注视频）+ `results/preview_*.png`（每 120 帧一张静帧）。
+
+> **关于预览图**：它是"每 120 帧抽一张"的抽检，**开头那几张（如 `preview_0000.png`）通常没有目标**
+> ——素材开头本来就没有装甲板。**判据请看 `.avi` 与 `frames w/ armor` 百分比**，预览图只是让你快速瞄一眼。
 
 **预期效果**：打开 `results/detector_demo.avi`，装甲板应被绿框套住（第 240 帧本仓库实测检出 1 个目标）。
 若整段视频一个框都没有 → 先查模型路径是否写对（写错或缺文件会退回默认模型/报错），再看视频路径；
@@ -722,29 +734,34 @@ pose 模式下的 rqt 实时标注（绿框由 4 个灯条端点推出，左上�
 
 ![pose 模式 rqt 实时标注](docs/screenshots/pose_rqt.png)
 
-### 真实相机
+### 相机通路（网络流 / 工业相机）
 
 ```bash
 # A. 手机 IP Webcam（Android 的 "IP Webcam" 类 App）：必须横屏，地址必须带 /video
 ros2 launch rm_armor_visualization armor_tracker.launch.py \
     source:=ip ip_url:=http://192.168.1.10:8080/video        # 换成你手机上显示的实际地址
 
-# B. 海康工业相机（需以 USE_HIK_SDK=ON 构建；现场只改 yaml 里的序列号）
-$EDITOR data/camera.yaml      # 把 serial_number 改成相机上的实际序列号
+# B. 海康工业相机（setup.sh 检测到 /opt/MVS 会自动开启 USE_HIK_SDK；现场只改 yaml 里的序列号）
+nano data/camera.yaml         # 把 serial_number 改成相机上的实际序列号
 ros2 launch rm_armor_visualization armor_tracker.launch.py source:=hik use_rqt:=true
 ```
 
 > 手机流地址**必须带 `/video`**（裸地址是网页，`VideoCapture` 打不开）；竖屏会产生 90° 旋转元数据 →
 > PnP 镜像假解（z<0），**务必横屏**。
 
-### 真实相机验证证据（2026-09-09）
+### 相机通路验证证据（2026-09-09）
 
-![手机 IP Webcam 实拍屏幕 + rqt 实时标注](docs/screenshots/phone_rqt.png)
+![手机 IP Webcam + rqt 实时标注](docs/screenshots/phone_rqt.png)
+
+> **如实说明这是怎么拍的**：**手机（IP Webcam App）对着笔记本屏幕**拍摄，屏幕上播放 `data/demo.avi`。
+> 所以它验证的是「**相机（网络流）→ ROS2 → 检测 → PnP → EKF → 可视化**」这条**通路本身**能否跑通，
+> **不是在真实场地 / 实车上的验证**；本工程开发机**没有工业相机**，`source:=hik` 只验证到"枚举不到设备并明确报错"。
 
 - 截图 `docs/screenshots/phone_rqt.png`：检测框锁定目标，`d=1.05m v=(0.5,0.2,1.3)` 实时输出；
-- 录屏 `results/real_camera_2026-09-09.mkv`（24 s）：手机实拍 → detect → PnP → EKF → 可视化全程；
-- 内容决策：靶面用 `data/demo.avi`（**非训练集、光照差、角度极端**）回放——苛刻条件下仍持续锁定，
-  比理想素材更能证明真实鲁棒性；`d≈0.8~1.1 m` 与手机到屏幕的实际距离同量级（内参为近似，见局限）。
+- 录屏 `results/real_camera_2026-09-09.mkv`（24 s）：手机取流 → detect → PnP → EKF → 可视化全程；
+- 为什么用"对屏回放"：靶面仍是 `data/demo.avi`（**非训练集、光照差、角度极端**），
+  再叠加一次**二次成像**（屏幕 → 手机镜头）的退化，条件比直出视频更苛刻，能更严格地检验链路稳定性；
+  `d≈0.8~1.1 m` 与手机到屏幕的实际距离同量级（内参为近似，见局限）。
 
 ### 可视化
 
@@ -753,8 +770,8 @@ ros2 launch rm_armor_visualization armor_tracker.launch.py source:=hik use_rqt:=
 - **Foxglove**：标准 `sensor_msgs/Image` 可直接订阅；自定义消息需要加载 `rm_interfaces` 的定义。
   P0 阶段曾用它做过 `/armor/state → 3D 位姿` 的展示节点，因不属于题面必需、且要动稳定文件而**回档移除**
   （log.md §17.4），需要时可作为扩展重新接上。
-- 未接仿真器：题面要求"可接入仿真、真实相机验证算法"，本工程走通**真实相机**路线；
-  河科视觉仿真器（内参精确已知）是后续可选项。
+- 未接仿真器：题面要求"可接入仿真、真实相机验证算法"，本工程走通的是**相机通路**（手机 IP Webcam 网络流；
+  开发机无工业相机）；河科视觉仿真器（内参精确已知）是后续可选项。
 
 ### 已知局限
 
@@ -786,6 +803,9 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 ./build/04_hik/hik_grab 你的相机序列号 30
 ```
 
+> `bash scripts/setup.sh` 在检测到 `/opt/MVS` 时**已经自动构建过 `04_hik`，并给题3 的节点打开了 `USE_HIK_SDK`**；
+> 上面这几条命令是单独重建 / 调试时用的。
+
 **预期效果**
 
 - **没接相机**时（本仓库开发机就是这种情况）：三个程序都会打印类似
@@ -813,7 +833,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 
 `results/` 是运行输出目录（已在 `.gitignore` 里）。其中**入库的只有三样**：
 
-1. `real_camera_2026-09-09.mkv` —— 真实相机验证的录屏（提交证据）；
+1. `real_camera_2026-09-09.mkv` —— 相机通路验证的录屏（提交证据；**手机对屏回放**，见「题3 → 相机通路验证证据」）；
 2. `eval_baseline_summary.txt`、`eval_pose_summary.txt` —— **本仓库作者自己跑出来的原始评测汇总**
    （各约 0.5 KB），用于直接核对「687 帧实测」表；有顾虑可照题2 快速验证第 3 条自己重跑一遍复现。
 
@@ -826,7 +846,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | 题2 PnP 解算正确性 | log.md §11.6（数字可复算） | `./build/02_tracker/pnp_demo data/demo.avi models/armor_yolov8n.onnx 120` |
 | 题2 平滑效果 | —（生成物） | `./build/02_tracker/tracker_demo data/demo.avi models/armor_yolov8n.onnx 300` → `results/tracker_demo.avi` |
 | ② 角点精修负结果 | —（调试图生成物） | `RM_CORNER_DEBUG=1 ./build/02_tracker/eval_demo data/demo.avi models/armor_yolov8n.onnx 200 t_refine refine bbox` → `results/corner_dbg_*.png` |
-| 题3 真实相机验证 | `results/real_camera_2026-09-09.mkv`、`docs/screenshots/phone_rqt.png` | `source:=ip` + 手机横屏 |
+| 题3 相机通路验证 | `results/real_camera_2026-09-09.mkv`、`docs/screenshots/phone_rqt.png` | `source:=ip` + 手机横屏（靶面=笔记本屏幕播放 demo.avi） |
 | pose 模式的可视化 | `docs/screenshots/pose_rqt.png` | `ros2 launch rm_armor_visualization armor_tracker.launch.py detector:=pose pose_model_path:="$POSE_MODEL" use_rqt:=true` |
 | 快速建立整体认识 | `docs/notes.md`（**主题归纳**，9 节） | 架构 / 关键常数 / 两种检测器 / 语义与后端 / 位姿与滤波 / 评测口径 / 踩坑速查 / 负结果 / 术语表 |
 | 原理、推导与踩坑全过程 | `docs/log.md`（**过程日志**，23 章） | 按 §0 目录读；§20（四关键点与评测）、§21（负结果全录 + 交付对照）、§22（三重交叉验证）是本轮核心 |
@@ -904,6 +924,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | **v3.8** | 2026-09-11 | 顶部重排为**三步**（clone → 环境配置 → 快速验证）消除原「快速开始/快速验证」的重合；新增 **`scripts/check_env.sh` 环境自检脚本**（逐项检查系统/工具链/ROS2 与所需包/colcon/OpenCV/可选 ORT 与 MVS SDK/仓库素材，缺失项直接给出安装命令，退出码可判成败）；「环境与依赖」补指向自检的入口 |
 | **v3.9** | 2026-09-11 | 顶部与文末新增「**代码来源与用途声明**」：明确**代码实现由 AI 工具 DSH 生成**，本人负责需求拆解/技术路线与取舍/代码审查与修改意见/验收纠错/笔记组织，**仅作学习记录、未经生产验证**；`log.md` 与 `notes.md` 顶部同步加精简声明；同时撤回上一版试做的阅读状态标注 |
 | **v3.10** | 2026-09-12 | 修"干净环境跑 pose 失败"的体验问题：① `scripts/setup.sh` / `check_env.sh` 的 ONNX Runtime 探测扩到多个候选路径（含仓库上两级、`/opt`、`/usr/local`、`$HOME`），未找到时明确提示用 `ORT_DIR=…` 重跑，并警告不启用 ORT 时 pose 会直接报错；② launch 用 **`RegisterEventHandler(OnProcessExit …) + Shutdown`** 实现"主节点一退出、launch 立即整体退出"（试过 `Node(required=True)`，但 **Humble 不支持该参数**），不再留一个空 rqt 窗口；③ 「快速验证」把"pose 需要 ONNX Runtime"提为**显式前置**，并给出下载/解压/重构建的四行命令；④ FAQ 新增"窗口打开了但没有图像"一条 |
+| **v3.14** | 2026-09-12 | 按 clone 者反馈修订：① 「构建」与「04_hik」开头注明"**已跑过 `setup.sh` 可跳过**"；② 明确 `setup.sh` **也覆盖海康模块**（自动开 `USE_HIK_SDK` 并构建 `04_hik`，现场只需装 MVS + 填序列号）；③ **更正"真实相机"的表述**——验证用的是**手机 IP Webcam 对着笔记本屏幕回放 `demo.avi`**（二次成像），既不是真实场地/实车、也不是工业相机；标题与措辞统一改为「相机通路验证」；④ 题1 产物补"预览图开头几张可能没有目标"的说明；⑤ 「环境与依赖」里的自检指引收成一行 |
 | **v3.13** | 2026-09-12 | 修 `scripts/setup.sh`：**ORT 开关此前只传给题3 的 colcon，没给题1/题2 的普通 CMake** —— 实测这会让 clone 者编出的 `build/02_tracker/eval_demo` 是 `USE_ONNXRUNTIME=OFF`，于是 README 题2 快速验证第 3 条（复现 687 帧 A/B 表）直接抛异常；现改为 ORT 开关同时传给 01/02 的 `cmake -S`（探不到 ORT 时不加，行为不变）。顺带把"pose 可用于哪里"的措辞统一为：**题3 完整链路 + 题2 的离线评测基础设施 `eval_demo`** |
 | **v3.12** | 2026-09-12 | 明确"哪里能用 pose"：题1/题2 的 `armor_demo` / `corner_demo` / `pnp_demo` / `tracker_demo` / `lightbar_demo` **都只支持 bbox**（学习阶段就是按 bbox 走的）；**pose 是最后优化阶段引入的**，只用于**题3 的完整链路**与**题2 的评测工具 `eval_demo`** —— 在题1 开头、两题的「快速验证」与「命令行通用约定」表里都写清楚（曾尝试给这些 demo 加 `detector` 参数，评估后**放弃并回档**，避免改动稳定代码） |
 | **v3.11** | 2026-09-12 | 让"clone 者照 README 复制粘贴"就能看到效果：ONNX Runtime 探测新增 **ROS 官方 vendor 包路径**（`/opt/ros/$ROS_DISTRO/opt/onnxruntime_vendor`，实测可直接当 `ORT_DIR` 用）与 `third_party/onnxruntime`；未找到时提示改为**首选 `apt install ros-humble-onnxruntime-vendor`**、备选下载解压；「快速验证」改为**先跑零依赖的 ①（bbox）、再按需升级 ②（pose）**；FAQ 补 `pip install onnxruntime` 混淆一条；顶部注明"不装 ORT 也能完整跑通三题" |
