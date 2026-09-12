@@ -120,7 +120,11 @@ if [[ -n "${ORT_DIR:-}" && -f "$ORT_DIR/include/onnxruntime_cxx_api.h" ]]; then
     ORT_FOUND="$ORT_DIR"
 fi
 if [[ -z "$ORT_FOUND" ]]; then
-    for candidate in "$REPO/../.models_ext/onnxruntime" "$HOME"/onnxruntime-linux-x64-*; do
+    for candidate in "$REPO/.models_ext/onnxruntime" "$REPO/../.models_ext/onnxruntime" \
+             "$REPO/../../.models_ext/onnxruntime" "$REPO/third_party/onnxruntime" \
+             "/opt/ros/${ROS_DISTRO:-humble}/opt/onnxruntime_vendor" \
+             /opt/onnxruntime /usr/local/onnxruntime \
+             "$HOME"/onnxruntime-linux-x64-* "$HOME"/onnxruntime*; do
         if [[ -f "$candidate/include/onnxruntime_cxx_api.h" ]]; then ORT_FOUND="$candidate"; break; fi
     done
 fi
@@ -133,9 +137,10 @@ if [[ -n "$ORT_FOUND" ]]; then
         || warn "有头文件但没找到 $ORT_FOUND/lib/libonnxruntime.so，构建可能失败"
     hint "构建时用：ORT_DIR=$ORT_FOUND bash scripts/setup.sh"
 else
-    warn "未找到 ONNX Runtime —— detector:=pose 不可用（bbox 通路不受影响）"
-    hint "到 https://github.com/microsoft/onnxruntime/releases 下载 onnxruntime-linux-x64-*.tgz，"
-    hint "解压后：ORT_DIR=/你的解压目录 bash scripts/setup.sh"
+    warn "未找到 ONNX Runtime —— detector:=pose 不可用（bbox 通路完全不受影响）"
+    hint "首选（装了 ROS2 就有源，一条命令）：sudo apt install ros-${ROS_DISTRO:-humble}-onnxruntime-vendor"
+    hint "备选（离线 / 没有 ROS 源）：取 onnxruntime-linux-x64-*.tgz 解压，再 ORT_DIR=/解压目录 bash scripts/setup.sh"
+    hint "注意：pip install onnxruntime 是 Python 包，C++ 链接不了，别用那个"
 fi
 
 # ---------------------------------------------------------------- 5. 可选：海康 MVS SDK

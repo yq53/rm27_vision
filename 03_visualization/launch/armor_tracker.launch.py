@@ -18,8 +18,17 @@
 import os
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, LogInfo, OpaqueFunction, SetEnvironmentVariable
+from launch.actions import (
+    DeclareLaunchArgument,
+    EmitEvent,
+    LogInfo,
+    OpaqueFunction,
+    RegisterEventHandler,
+    SetEnvironmentVariable,
+)
 from launch.conditions import IfCondition
+from launch.event_handlers import OnProcessExit
+from launch.events import Shutdown
 from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 
@@ -80,13 +89,30 @@ def _launch_setup(context, *args, **kwargs):
         )
 
     actions.append(LogInfo(msg=f"[armor_tracker.launch] 图像源 = {source_desc}"))
+    tracker_node = Node(
+        package="rm_armor_visualization",
+        executable="armor_tracker_node",
+        name="armor_tracker_node",
+        output="screen",
+        parameters=[params],
+    )
+    actions.append(tracker_node)
+    # 主节点一旦退出（例如 detector:=pose 但构建没启用 ONNX Runtime，或相机打不开），
+    # 就让整个 launch 跟着退出——否则 rqt 窗口会空着，看起来像"启动了但没图像"，
+    # 很难意识到节点其实已经死了。（Node 本身没有 required 参数，用事件处理器实现）
     actions.append(
-        Node(
-            package="rm_armor_visualization",
-            executable="armor_tracker_node",
-            name="armor_tracker_node",
-            output="screen",
-            parameters=[params],
+        RegisterEventHandler(
+            OnProcessExit(
+                target_action=tracker_node,
+                on_exit=[
+                    LogInfo(
+                        msg="[armor_tracker.launch] 主节点已退出，launch 一并退出。"
+                        "常见原因：detector:=pose 但构建时未启用 ONNX Runtime；"
+                        "或视频/模型/相机路径不对 —— 具体原因见上面节点打印的 ERROR。"
+                    ),
+                    EmitEvent(event=Shutdown(reason="主节点已退出")),
+                ],
+            )
         )
     )
 

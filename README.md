@@ -15,7 +15,8 @@
 - 素材：`data/demo.avi`（687 帧，自录，**只作测试集、永不进训练**）；模型全部随仓库提供
 - 检测器：**默认的 bbox 模型是本仓库自己训练的（训练量小、效果一般）**；
   **推荐的四关键点模型来自深圳大学 RobotPilots 战队 26 赛季开源**（题面并未要求，是我为提高效果主动引入的）——
-  两者对比见「题1」，来源链接见文末「参考仓库与教程」
+  两者对比见「题1」，来源链接见文末「参考仓库与教程」。
+  **不装 ONNX Runtime 也能完整跑通三题**（走 bbox 路线）；ORT 只是为了多一条效果更好的 pose 路线
 - 评测：`eval_demo` 统一口径离线评测（逐帧 CSV + 汇总），本 README 里的指标数字都可复现
 
 ## 第一步：clone
@@ -52,7 +53,7 @@ bash scripts/check_env.sh
 | colcon | `sudo apt install python3-colcon-common-extensions` |
 | OpenCV 开发包 | `sudo apt install libopencv-dev` |
 | 编译工具链 | `sudo apt install build-essential cmake pkg-config` |
-| **可选**：ONNX Runtime（只有 `detector:=pose` 需要） | 到 https://github.com/microsoft/onnxruntime/releases 下载 `onnxruntime-linux-x64-*.tgz`，**解压即可、无需安装** |
+| **可选**：ONNX Runtime（只有 `detector:=pose` 需要） | **首选** `sudo apt install ros-humble-onnxruntime-vendor`（一条命令）；**备选** 到 https://github.com/microsoft/onnxruntime/releases 下载 `onnxruntime-linux-x64-*.tgz` 解压后用 `ORT_DIR=` 指定。⚠️ `pip install onnxruntime` 是 **Python** 包，C++ 用不了 |
 | **可选**：海康 MVS SDK（只有 `source:=hik` 需要） | 装海康 MVS 客户端（自带 SDK）；另需 `sudo apt install libyaml-cpp-dev` |
 | ROS 日志目录不可写（`~/.ros` 只读） | `export ROS_LOG_DIR=$PWD/.roslog` |
 
@@ -86,14 +87,34 @@ POSE_MODEL=models/third_party/Infantry-v8n/Infantry-v8n-fp16-20260726-D1.8w-B16.
 
 ### A. demo 视频（`data/demo.avi`，仓库自带）
 
-> **推荐先跑 ②**：四关键点模型来自深圳大学 RobotPilots 战队 26 赛季开源，效果明显更好；
-> ① 用的是本仓库自训的 bbox 模型（训练量小、效果一般），留作基线对照。
+> **先跑 ①**：它**零额外依赖** —— 装好 ROS2 + OpenCV 就能跑（自训 bbox 模型：检出率一般，但整条链路完整）。
+> **再按需升级到 ②**：四关键点模型来自深圳大学 RobotPilots 战队 26 赛季开源，效果明显更好，
+> 但**要先启用 ONNX Runtime**（见下面的前置说明）。
+
+> ⚠️ **② 的前置条件：构建时要启用 ONNX Runtime。** 判断方法很简单——看 `bash scripts/setup.sh` 输出里的
+> `USE_ONNXRUNTIME` 是 `ON` 还是 `OFF`。若是 `OFF`，跑 ② 会**直接报错退出**
+> （终端打印 `ArmorPoseDetector 需要 ONNX Runtime 后端…`，launch 随之整体退出，不会留下空窗口）。
+> 启用方法二选一：
+>
+> ```bash
+> # 方式一（推荐：装了 ROS2 就有软件源，一条命令）
+> sudo apt install ros-humble-onnxruntime-vendor     # 发行版名按你的改（即 $ROS_DISTRO）
+> bash scripts/setup.sh                              # 重新构建，会自动探测到并启用
+>
+> # 方式二（离线 / 没有 ROS 源）：下载解压即可，无需安装
+> ORT_VER=1.23.2     # ← 换版本就改这里（可用版本见 https://github.com/microsoft/onnxruntime/releases）
+> wget "https://github.com/microsoft/onnxruntime/releases/download/v$ORT_VER/onnxruntime-linux-x64-$ORT_VER.tgz"
+> tar xzf "onnxruntime-linux-x64-$ORT_VER.tgz"
+> ORT_DIR="$PWD/onnxruntime-linux-x64-$ORT_VER" bash scripts/setup.sh
+>
+> bash scripts/check_env.sh                          # [4/6] 应显示 [ OK ]
+> ```
 
 ```bash
-# ① 视频 + bbox 检测器（默认；本仓库自训模型，效果一般）
+# ① 视频 + bbox 检测器（默认；零额外依赖，先跑这条）
 ros2 launch rm_armor_visualization armor_tracker.launch.py use_rqt:=true print_state:=true
 
-# ② 视频 + 四关键点检测器
+# ② 视频 + 四关键点检测器（需先启用 ONNX Runtime，见下）
 ros2 launch rm_armor_visualization armor_tracker.launch.py \
     detector:=pose pose_model_path:="$POSE_MODEL" use_rqt:=true print_state:=true
 ```
@@ -109,7 +130,9 @@ ros2 launch rm_armor_visualization armor_tracker.launch.py \
 - **一眼分辨两种检测器**：`pose` 的绿框由 4 个灯条端点推出，通常会**同时套住同一块板的两根灯条**；
   `bbox` 沿用检测框，常常只套住其中一根。
 - 只想要画面、不要终端数字：去掉 `print_state:=true`；不要 rqt：去掉 `use_rqt:=true`。
-- 对不上时先查两件事：有没有 `source install/setup.bash`；`detector:=pose` 的构建是否启用了 ONNX Runtime（见 FAQ）。
+- 对不上时先查三件事：① 有没有 `source install/setup.bash`；② `detector:=pose` 是否在**启用 ONNX Runtime 的构建**
+  里跑（见上面 ② 的前置条件）；③ **终端里主节点那两行 INFO 有没有出现**——没出现就是节点启动失败了，
+  launch 会立刻整体退出并打印原因。
 
 ### B. 海康相机流（`source:=hik`）
 
@@ -214,7 +237,7 @@ rm27_vision/
 
 | 依赖 | 用途 | 开启方式 |
 |---|---|---|
-| ONNX Runtime ≥ 1.16（C++，解压即用） | 四关键点模型后端（`detector:=pose`） | `-DUSE_ONNXRUNTIME=ON -DONNXRUNTIME_DIR=<ORT 根目录>` |
+| ONNX Runtime ≥ 1.16（C++，解压即用） | 四关键点模型后端（`detector:=pose`） | `-DUSE_ONNXRUNTIME=ON -DONNXRUNTIME_DIR="$ORT_DIR"` |
 | 海康 MVS SDK 5.0.2（默认装到 `/opt/MVS`） | 海康工业相机图像源（`source:=hik`） | `-DUSE_HIK_SDK=ON`（可加 `-DMVS_SDK_DIR=...`） |
 | `rqt_image_view` | 查看标注图 | `sudo apt install ros-humble-rqt-image-view` |
 
@@ -794,7 +817,9 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 
 | 现象 | 原因 / 解法 |
 |---|---|
-| `detector:=pose` 报"需要 ONNX Runtime 后端" | 该构建未开 ORT → 按「构建 C」重建（`-DUSE_ONNXRUNTIME=ON -DONNXRUNTIME_DIR="$ORT_DIR"`） |
+| `detector:=pose` 报"需要 ONNX Runtime 后端" | 该构建未启用 ORT → 先 `sudo apt install ros-humble-onnxruntime-vendor`（或 `ORT_DIR=/你的/onnxruntime`），再 `bash scripts/setup.sh` 重建 |
+| `pip install onnxruntime` 装了，构建还是找不到 | 那是 **Python** 包（只给 python 用，不含 C++ 头文件、也没有可链接的 `.so`）→ C++ 要用 apt 的 `ros-humble-onnxruntime-vendor`，或发布页的 `onnxruntime-linux-x64-*.tgz` |
+| rqt 窗口打开了，但**一直没有图像** | 主节点已经退出（最常见原因就是上一条）。launch 里主节点现在是 `required=True`，**节点一挂 launch 会整体退出**并把 ERROR 打在终端；若仍看到空窗口，多半是上一次运行的 rqt 残留，关掉重开 |
 | ORT 报 float16/float32 类型不匹配 | 用了 `convert_fp16_to_fp32.py` 的产物 → ORT 必须用**原始导出件** |
 | `source:=hik` 节点死掉，但 `ros2 launch` 看起来是成功的 | 无相机 / 序列号没填时节点 exit 255，**launch 进程本身仍返回 0** → 以节点日志为准 |
 | 某条命令像卡住了，不结束 | 帧数参数传了非数字 → `atoi` 静默变 0 = 跑全片（只有 `armor_demo` 会报错） |
@@ -859,6 +884,8 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | **v3.6** | 2026-09-11 | 如实标注模型强弱：说明 **bbox 模型是本仓库自训（训练量小、效果一般）**，**推荐使用深大 26 开源的 pose 模型**并标注其来源；新增文末 **「参考仓库与教程」**（10 条带链接，首位即深大 RobotPilots 的模型开源帖） |
 | **v3.7** | 2026-09-11 | 文档分层：原 `docs/notes.md` 整体改名为 **`docs/log.md`（过程日志，内容与章号一字不改）**；新建 **`docs/notes.md`（按主题归纳的总结，9 节，每条结论标注 `log.md §` 出处）**；README 中原先指向"过程/证据"的引用统一改指 `log.md`，并新增指向归纳笔记的入口；完成 README ↔ notes ↔ log 三重交叉验证 |
 | **v3.8** | 2026-09-11 | 顶部重排为**三步**（clone → 环境配置 → 快速验证）消除原「快速开始/快速验证」的重合；新增 **`scripts/check_env.sh` 环境自检脚本**（逐项检查系统/工具链/ROS2 与所需包/colcon/OpenCV/可选 ORT 与 MVS SDK/仓库素材，缺失项直接给出安装命令，退出码可判成败）；「环境与依赖」补指向自检的入口 |
+| **v3.11** | 2026-09-12 | 让"clone 者照 README 复制粘贴"就能看到效果：ONNX Runtime 探测新增 **ROS 官方 vendor 包路径**（`/opt/ros/$ROS_DISTRO/opt/onnxruntime_vendor`，实测可直接当 `ORT_DIR` 用）与 `third_party/onnxruntime`；未找到时提示改为**首选 `apt install ros-humble-onnxruntime-vendor`**、备选下载解压；「快速验证」改为**先跑零依赖的 ①（bbox）、再按需升级 ②（pose）**；FAQ 补 `pip install onnxruntime` 混淆一条；顶部注明"不装 ORT 也能完整跑通三题" |
+| **v3.10** | 2026-09-12 | 修"干净环境跑 pose 失败"的体验问题：① `scripts/setup.sh` / `check_env.sh` 的 ONNX Runtime 探测扩到 7 个候选路径（含仓库上两级、`/opt`、`/usr/local`、`$HOME`），未找到时明确提示用 `ORT_DIR=…` 重跑，并警告不启用 ORT 时 pose 会直接报错；② launch 里主节点改为 **`required=True`**——节点一退出整个 launch 立即退出，不再留一个空 rqt 窗口；③ 「快速验证」把"pose 需要 ONNX Runtime"提为**显式前置**，并给出下载/解压/重构建的四行命令；④ FAQ 新增"窗口打开了但没有图像"一条 |
 | **v3.9** | 2026-09-11 | 顶部与文末新增「**代码来源与用途声明**」：明确**代码实现由 AI 工具 DSH 生成**，本人负责需求拆解/技术路线与取舍/代码审查与修改意见/验收纠错/笔记组织，**仅作学习记录、未经生产验证**；`log.md` 与 `notes.md` 顶部同步加精简声明；同时撤回上一版试做的阅读状态标注 |
 
 ---

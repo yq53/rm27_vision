@@ -49,8 +49,13 @@ fi
 # ---------- 2) 探测可选依赖 ----------
 CMAKE_ARGS=()
 
+# 在多个常见位置找 ONNX Runtime（解压即用的目录，特征文件是 include/onnxruntime_cxx_api.h）
 if [[ -z "${ORT_DIR:-}" ]]; then
-    for candidate in "$REPO/../.models_ext/onnxruntime" "$HOME/onnxruntime-linux-x64-1.23.2"; do
+    for candidate in "$REPO/.models_ext/onnxruntime" "$REPO/../.models_ext/onnxruntime" \
+             "$REPO/../../.models_ext/onnxruntime" "$REPO/third_party/onnxruntime" \
+             "/opt/ros/${ROS_DISTRO:-humble}/opt/onnxruntime_vendor" \
+             /opt/onnxruntime /usr/local/onnxruntime \
+             "$HOME"/onnxruntime-linux-x64-* "$HOME"/onnxruntime*; do
         if [[ -f "$candidate/include/onnxruntime_cxx_api.h" ]]; then
             ORT_DIR="$candidate"
             break
@@ -61,9 +66,13 @@ if [[ -n "${ORT_DIR:-}" && -f "$ORT_DIR/include/onnxruntime_cxx_api.h" ]]; then
     echo "[setup] 检测到 ONNX Runtime：$ORT_DIR  → 启用四关键点检测器（detector:=pose）"
     CMAKE_ARGS+=(-DUSE_ONNXRUNTIME=ON "-DONNXRUNTIME_DIR=$ORT_DIR")
 else
-    echo "[setup] 未检测到 ONNX Runtime → 只构建 bbox 通路"
-    echo "        需要 pose 的话：解压 onnxruntime-linux-x64-*.tgz 后跑"
-    echo "        ORT_DIR=/你的/onnxruntime bash scripts/setup.sh"
+    echo "[setup] 未检测到 ONNX Runtime → 只构建 bbox 通路（detector:=pose 将不可用）"
+    echo "        · 首选（装了 ROS2 就有源，一条命令）："
+    echo "              sudo apt install ros-${ROS_DISTRO:-humble}-onnxruntime-vendor"
+    echo "        · 备选（离线 / 没有 ROS 源）：下载 onnxruntime-linux-x64-*.tgz 解压后指过来"
+    echo "              ORT_DIR=/你的解压目录 bash scripts/setup.sh"
+    echo "              （下载页 https://github.com/microsoft/onnxruntime/releases）"
+    echo "        ⚠ 不启用 ORT 时，README 第三步的 ②（pose）会直接报错退出；①（bbox）不受影响。"
 fi
 
 if [[ -f /opt/MVS/include/MvCameraControl.h ]]; then
