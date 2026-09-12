@@ -169,6 +169,7 @@
 ## 9. 文档地图与交叉验证
 
 - 想**准备环境** → `bash scripts/check_env.sh`（依赖自检，缺什么给什么安装命令）+ `bash scripts/setup.sh`（配置环境并构建）
+- 想**改完文档做体检** → `bash scripts/check_docs.sh`（代码栅栏/尖括号/版本序/`§` 与路径引用）
 - 想**跑起来看效果** → `README.md`（「第三步：快速验证（题3）」）
 - 想**核对数字** → `README.md`「687 帧实测」+ `results/eval_*_summary.txt`（已入库）
 - 想**快速建立整体认识** → 本文件

@@ -75,6 +75,9 @@ bash scripts/setup.sh
 
 > 不想用脚本也行：手工命令见「构建」一节，效果完全一样。**脚本只做"环境 + 构建"，不启动任何程序。**
 
+> **文档自检**：改完 README / notes / log 后建议跑一次 `bash scripts/check_docs.sh` —— 它检查代码栅栏配平、
+> 代码块里没有会破坏粘贴的尖括号占位符、修订记录版本号升序、以及 `§` 与文件路径的交叉引用是否有效（退出码 0/1）。
+
 **海康相机模块也在覆盖范围内**：检测到 `/opt/MVS` 时，`setup.sh` 会
 ①给出题3 的节点打开 `USE_HIK_SDK`（也就是 `source:=hik` 图像源）、②顺带构建 `04_hik` 学习 demo。
 所以现场接入海康相机只需三步：**装 MVS 客户端（含 SDK）→ `data/camera.yaml` 填序列号 → `ros2 launch … source:=hik`**。
@@ -204,7 +207,10 @@ rm27_vision/
 │   ├── src/armor_state_printer.cpp    #   可选：[工具] 把 /armor/state 打到终端（launch 的 print_state:=true）
 │   └── launch/armor_tracker.launch.py #   一键启动
 ├── 04_hik/                    # 海康 MVS SDK 学习 demo（probe/open/grab，独立构建，不参与主构建）
-├── scripts/setup.sh           # 一键配置环境 + 构建（不启动任何程序；启动统一交给 launch，见题3）
+├── scripts/
+│   ├── check_env.sh           # 环境自检：6 组依赖检查 + 缺失项的安装命令
+│   ├── setup.sh               # 一键配置环境 + 构建（不启动任何程序；启动统一交给 launch）
+│   └── check_docs.sh          # 文档自检：代码栅栏/尖括号/版本序/§引用/路径引用
 ├── rm_interfaces/             # 自定义消息接口包（ArmorState.msg）
 ├── docs/
 │   ├── notes.md               # 主题归纳（架构/常数/口径/踩坑速查/术语，每条结论标 log 出处）
@@ -222,6 +228,7 @@ rm27_vision/
 |---|---|---|
 | **核心**（运行时必需） | `01_detector/src/armor_detector.cpp`、`armor_pose_detector.cpp`；`02_tracker/src/armor_pnp.cpp`、`armor_ekf.cpp`；`03_visualization/src/armor_tracker_node.cpp`、`image_source.hpp` / `.cpp`；`rm_interfaces/msg/ArmorState.msg`；`models/armor_yolov8n.onnx` | 主节点起不来，或少一条检测器/解算通路 |
 | **工具**（非运行时，但决定"指标能不能复现"） | `02_tracker/src/eval_demo.cpp`、`02_tracker/scripts/compare_eval.py`、`01_detector/scripts/convert_fp16_to_fp32.py` | 主节点照常，但 687 帧 A/B 表无法复现 |
+| **工具**（工程自检） | `scripts/check_env.sh`（环境）、`scripts/check_docs.sh`（文档结构 + 交叉引用） | 少掉两层"自动体检"；`check_docs.sh` 会校验代码栅栏配平、代码块里无尖括号占位符、修订记录版本升序、`§` 与文件路径引用是否有效 |
 | **使用体验（可选，删掉不影响任何功能）** | `scripts/setup.sh`、`03_visualization/src/armor_state_printer.cpp` | 少掉"一键配置环境+构建"和"终端里的状态数字" |
 | **教学 / 演示**（学习过程留档） | `01_detector/src/demo_main.cpp`；`02_tracker/src/{projection,corner,pnp,tracker,lightbar}_demo.cpp`；`03_visualization/src/armor_video_node.cpp`；`04_hik/src/*.cpp` | 无影响 |
 | **负结果存档** | `02_tracker/src/armor_corner.cpp`、`light_bar_detector.cpp` | 无影响（只被 `eval_demo` 的两个可选模式引用；证据见 log.md §15、§21.1） |
@@ -928,6 +935,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | **v3.12** | 2026-09-12 | 明确"哪里能用 pose"：题1/题2 的 `armor_demo` / `corner_demo` / `pnp_demo` / `tracker_demo` / `lightbar_demo` **都只支持 bbox**（学习阶段就是按 bbox 走的）；**pose 是最后优化阶段引入的**，只用于**题3 的完整链路**与**题2 的评测工具 `eval_demo`** —— 在题1 开头、两题的「快速验证」与「命令行通用约定」表里都写清楚（曾尝试给这些 demo 加 `detector` 参数，评估后**放弃并回档**，避免改动稳定代码） |
 | **v3.13** | 2026-09-12 | 修 `scripts/setup.sh`：**ORT 开关此前只传给题3 的 colcon，没给题1/题2 的普通 CMake** —— 实测这会让 clone 者编出的 `build/02_tracker/eval_demo` 是 `USE_ONNXRUNTIME=OFF`，于是 README 题2 快速验证第 3 条（复现 687 帧 A/B 表）直接抛异常；现改为 ORT 开关同时传给 01/02 的 `cmake -S`（探不到 ORT 时不加，行为不变）。顺带把"pose 可用于哪里"的措辞统一为：**题3 完整链路 + 题2 的离线评测基础设施 `eval_demo`** |
 | **v3.14** | 2026-09-12 | 按 clone 者反馈修订：① 「构建」与「04_hik」开头注明"**已跑过 `setup.sh` 可跳过**"；② 明确 `setup.sh` **也覆盖海康模块**（自动开 `USE_HIK_SDK` 并构建 `04_hik`，现场只需装 MVS + 填序列号）；③ **更正"真实相机"的表述**——验证用的是**手机 IP Webcam 对着笔记本屏幕回放 `demo.avi`**（二次成像），既不是真实场地/实车、也不是工业相机；标题与措辞统一改为「相机通路验证」；④ 题1 产物补"预览图开头几张可能没有目标"的说明；⑤ 「环境与依赖」里的自检指引收成一行 |
+| **v3.15** | 2026-09-12 | 新增 **`scripts/check_docs.sh` 文档自检脚本**（校验：代码栅栏配平 / 代码块内无尖括号占位符 / 修订记录版本号升序 / `§` 交叉引用有效 / 引用的仓库文件存在；退出码可判成败）—— 用历史上真实犯过的 4 类错误自测过，全部能被抓出；「目录结构」「文件清单」与「第二步」挂上入口 |
 
 ---
 
