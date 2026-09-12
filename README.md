@@ -903,12 +903,12 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 
 | # | 开源项目 / 教程 | 链接 | 我们用到了什么 |
 |---|---|---|---|
-| 1 | **深圳大学 RobotPilots｜RM2026 视觉模型统一部署库与识别模型开源** | https://bbs.robomaster.com/article/1942761 | **直接使用了其中的四关键点模型 `Infantry-v8n`**（题1 方案 B / `detector:=pose`）：权重随仓库提交在 `models/third_party/Infantry-v8n/`，来源与 sha256 见该目录 `SOURCE.md`，关键点语义按 `log.md §20.2` 实测确认 |
+| 1 | **深圳大学 RobotPilots｜RM2026 视觉模型统一部署库与识别模型开源** | https://github.com/SZURPVision/26_NNDeployment_Lib_and_Detection_Models · 社区原帖 https://bbs.robomaster.com/article/1942761 | **直接使用了其中的四关键点模型 `Infantry-v8n`**（题1 方案 B / `detector:=pose`）：权重随仓库提交在 `models/third_party/Infantry-v8n/`，来源与 sha256 见该目录 `SOURCE.md`，关键点语义按 `log.md §20.2` 实测确认 |
 | 2 | 同济大学 SuperPower｜`sp_vision_25` 视觉框架 | https://github.com/TongjiSuperPower/sp_vision_25 | 灯条端点 3D 建模思路、装甲板尺寸 135×125 / 230×127、灯条长度 56mm 的出处 → 本工程 `barEndObjectPoints`（源码曾在工作区本地 `reference/` 对照阅读，**未随本仓库发布**） |
-| 3 | 河北科技大学 Actor&Thinker｜RM2026 视觉算法仿真器 | https://bbs.robomaster.com/article/1887395 | "仿真里内参精确已知"的思路（本工程未接入，列为后续可选项） |
-| 4 | 河北科技大学 Actor&Thinker｜RM2026 YOLO26 端到端装甲板 ONNX 模型 | https://bbs.robomaster.com/article/1886180 | 端到端 / keypoint 类识别模型的对照阅读 |
-| 5 | 武汉科技大学崇实战队｜RM2026 算法综合开源（视觉 / 导航 / 决策） | https://bbs.robomaster.com/article/1936030 | 自瞄链路与工程结构的整体对照 |
-| 6 | 深圳大学 RobotPilots｜RM2024 识别模型 | https://bbs.robomaster.com/article/54091 | 早期装甲板识别模型的对照 |
+| 3 | 河北科技大学 Actor&Thinker｜RM2026 视觉算法仿真器 | https://github.com/Blackjack200/bevy_robomaster_simulator · 社区原帖 https://bbs.robomaster.com/article/1887395 | "仿真里内参精确已知"的思路（本工程未接入，列为后续可选项） |
+| 4 | 河北科技大学 Actor&Thinker｜RM2026 YOLO26 端到端装甲板 ONNX 模型 | https://github.com/PraySky1337/AT_NN_Detector · 社区原帖 https://bbs.robomaster.com/article/1886180 | 端到端 / keypoint 类识别模型的对照阅读 |
+| 5 | 武汉科技大学崇实战队｜RM2026 算法综合开源（视觉 / 导航 / 决策） | https://github.com/WUST-RM/awakening · 社区原帖 https://bbs.robomaster.com/article/1936030 | 自瞄链路与工程结构的整体对照（本工程 `data/camera.yaml` 的四项相机键名即对齐该仓库 `config/omni.yaml`，见 `log.md §19.10`） |
+| 6 | 深圳大学 RobotPilots｜RM2024 识别模型 | https://github.com/broalantaps/RobotDetectionModel · 社区原帖 https://bbs.robomaster.com/article/54091 | 早期装甲板识别模型的对照 |
 | 7 | 上科大十等星｜26 赛季自瞄教程 | https://fcn47qghdcqf.feishu.cn/wiki/Hcw1wxTMZicx0xkinuQcKHetn5d | 概念与工程结构的入门对照（题面推荐资料） |
 | 8 | Ultralytics YOLOv8 | https://github.com/ultralytics/ultralytics | 自训 bbox 模型的训练链；其 **AGPL-3.0** 同样适用于本仓库里的权重（见「许可说明」） |
 | 9 | ONNX Runtime | https://github.com/microsoft/onnxruntime | 四关键点模型的推理后端（可选构建项） |
@@ -957,6 +957,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | **v3.15** | 2026-09-12 | 新增 **`scripts/check_docs.sh` 文档自检脚本**（校验：代码栅栏配平 / 代码块内无尖括号占位符 / 修订记录版本号升序 / `§` 交叉引用有效 / 引用的仓库文件存在；退出码可判成败）—— 用历史上真实犯过的 4 类错误自测过，全部能被抓出；「目录结构」「文件清单」与「第二步」挂上入口 |
 | **v3.16** | 2026-09-12 | 修编辑器体验：`04_hik` 的源文件在 clangd 里报找不到 `MvCameraControl.h` —— 原因是 **clangd 只就近读一个 `compile_commands.json` 且不合并**，而根目录那个软链指向的是题3 的 DB（含 01/02/03、不含 04_hik）；`setup.sh` 现在会在 `./`、`01_detector/`、`02_tracker/`、`04_hik/` 各建一条软链指向对应构建目录，README「构建」与 FAQ 同步说明 |
 | **v3.17** | 2026-09-12 | **修"接上真机反而没画面"的致命问题**（真机实测反馈）：`source:=hik` 时相机输出 `BayerRG8`（`0x01080009`），而原实现只认 `BGR8_Packed`/`Mono8` → **每帧都被跳过**、画面全空（节点进程还活着，所以 `ros2 launch` 看似正常）。现在 ① 新增 `frameToBgr()` 统一转换七种格式（BGR8 / RGB8 / Mono8 / BayerRG8·GR8·GB8·BG8）；② `data/camera.yaml` 新增 `pixel_format` / `adc_bit_depth` / `trigger_mode` / `format` 四项（键名对齐战队自家项目 yaml；前三项以"请求"发给相机、不支持时只警告、**留空 = 不碰相机**）；③ 首帧打印相机实际输出格式、不支持的格式按帧计数提示。**顺带修正一个会让红蓝互换的坑**：OpenCV 与 GenICam 的 Bayer 命名错开一格（`BayerRG8` 必须用 `COLOR_BayerBG2BGR`），并用合成帧白盒测试（四种相位 × 四个转换码）验证，并与同济/武科大两个参考项目实际调用的枚举值（46）一致；FAQ / 相机通路 / 04_hik / 证据索引 / `notes.md` 踩坑表同步更新；另修正 FAQ 里"主节点 `required=True`"的过时表述（Humble 的 `Node` 无此参数，实际是用 `OnProcessExit + Shutdown` 实现） |
+| **v3.18** | 2026-09-12 | 修正「参考仓库与教程」表：其中 5 条原先是**社区帖链接而不是仓库**，现改为对应的 GitHub 仓库并把社区原帖留作出处——深大 26 模型 → `SZURPVision/26_NNDeployment_Lib_and_Detection_Models`、河科 26 仿真器 → `Blackjack200/bevy_robomaster_simulator`、河科 26 模型 → `PraySky1337/AT_NN_Detector`、武科 26 视觉 → `WUST-RM/awakening`、深大 24 模型 → `broalantaps/RobotDetectionModel`（5 个仓库均逐一核实存在且公开） |
 
 ---
 
