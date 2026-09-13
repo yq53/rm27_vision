@@ -882,7 +882,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | rqt 窗口打开了，但**一直没有图像** | 主节点已经退出（最常见原因就是上一条）。launch 用 `RegisterEventHandler(OnProcessExit …) + Shutdown` 让**主节点一退出、launch 立即整体退出**并把 ERROR 打在终端（Humble 的 `Node` **没有** `required` 参数，所以是用事件处理器实现的）；若仍看到空窗口，多半是上一次运行的 rqt 残留，关掉重开 |
 | ORT 报 float16/float32 类型不匹配 | 用了 `convert_fp16_to_fp32.py` 的产物 → ORT 必须用**原始导出件** |
 | `source:=hik` 节点死掉，但 `ros2 launch` 看起来是成功的 | 无相机 / 序列号没填时节点 exit 255，**launch 进程本身仍返回 0** → 以节点日志为准 |
-| `source:=hik` 画面全空，日志刷 `不支持的像素格式 17301513` | `0x01080009 = BayerRG8`：原实现只认 `BGR8_Packed`/`Mono8` → 相机**每帧都被跳过**（节点还活着，所以 `ros2 launch` 看似正常）。已在 v3.17 支持七种格式；若仍出现，看是不是 `BayerRG10/12`（`adc_bit_depth` 未钉成 `Bits_8`） |
+| `source:=hik` 画面全空，日志刷 `不支持的像素格式 17301513` | `0x01080009 = BayerRG8`：原实现只认 `BGR8_Packed`/`Mono8` → 相机**每帧都被跳过**（节点还活着，所以 `ros2 launch` 看似正常）。已在 v3.2 支持七种格式；若仍出现，看是不是 `BayerRG10/12`（`adc_bit_depth` 未钉成 `Bits_8`） |
 | 海康画面**红蓝互换**（红装甲板看着是蓝的） | Bayer 相位取错：OpenCV 按图案"第二行第 2、3 个像素"命名，海康/GenICam 按"第一行前两个像素"命名，两边差一格 → `BayerRG8` 必须用 `COLOR_BayerBG2BGR`（写成同名的 `BayerRG2BGR` 就红蓝互换）。已修正并离线验证，见 log.md §19.10 |
 | 不想让本程序改动相机设置 | `data/camera.yaml` 的 `pixel_format` / `adc_bit_depth` / `trigger_mode` **留空 = 不调用 SDK**、用相机自己的默认值；`format` 是本工程自己的输出约定，不能留空 |
 | 编辑器里 `04_hik` 报找不到 `MvCameraControl.h`（01/02/03 却正常） | clangd **就近读第一个** `compile_commands.json` 且不合并：根目录那个是题3 的 DB（含 01/02/03，**不含** 04_hik）→ 跑 `bash scripts/setup.sh` 会自动在各工程目录建好软链；仍报错就删掉那一级的软链再重跑 |
@@ -932,32 +932,23 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 
 ## 修订记录
 
-> **版本号约定**：只有在**功能或效果有实质变化**时才进位大版本（v1 → v2 → v3）；
-> 纯文档结构、表述与使用体验的优化只递进次版本（v3.1、v3.2 …），不改动任何算法与接口。
+> **版本号怎么记**
+>
+> - `v1 / v2 / v3` 是**阶段里程碑**；`vX.Y` 只记**对外可见的变化**：新增功能、命令行/参数/文件布局变化、
+>   会影响 clone 者操作或结果的修复。
+> - **同一问题的连续修复、文档措辞与链接修正、脚本内部细节，合并进同一条**，不各占一行
+>   （v3.0 之后的文档与工具类改动已整体并入 v3.1）。
+> - 逐次流水看 `git log`，逐轮复盘与决策看 `docs/log.md`（§18、§19.10、§22.3）。**这张表只记里程碑。**
+> - 编号说明：2026-09-12 把原先逐次记录的 v3.1–v3.18 归并为本表；`git log` 与 `docs/log.md` 里
+>   出现的 `v3.10`…`v3.18` 是**归并前的编号**。
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
-| v1.0 | 2026-09-08 | 三题初稿运行说明 + 证据截图 |
-| v2.0 | 2026-09-09 | 复盘后重构：三题并列结构、状态总览表、补题2 运行/指标、FAQ、参考资料对照；修复录屏死链 |
-| v3.0 | 2026-09-11 | 按考核题面重写全文（功能层面：① 评测基础设施 + ② 角点精修负结果 + ③ 四关键点检测器）：补「考核要求对照」；新增题2 评测口径与 687 帧 A/B 表、两条 v2 负结果；题1 补四关键点检测器；题3 补检测器选择与真实相机；新增 04_hik 说明、证据索引、许可说明 |
-| v3.1 | 2026-09-11 | 文档：四关键点权重入库（`models/third_party/` + `SOURCE.md`）；「许可说明」改为按内容分层 |
-| **v3.2** | 2026-09-11 | 文档：全量命令实测校验后重写操作部分——新增「30 秒快速验证」「命令行通用约定」「文件清单：核心/工具/教学」；每题补齐「一般用法 → 快速验证 → 产物」；在源文件头加角色标签。修正 5 处与实测不符的说法（hik 的 `LD_LIBRARY_PATH` 非必需、`RM_CORNER_DEBUG` 传任意值即生效、`RMW` 只在跨 RMW 传大图时才是瓶颈、题面"仿真、真实相机"是并列而非二选一、② 的调试图是 `corner_dbg_*`）；补 `source:=hik` 时 `ros2 launch` 返回 0 但节点已死的提醒、海康通路的验证边界、pose 模式运行截图 |
-| **v3.3** | 2026-09-11 | 体验优化：新增「快速开始（clone → 跑起来）」；新增 `scripts/demo.sh` 一键启动脚本（手工版照旧保留）；新增可选节点 `armor_state_printer` + launch 参数 `print_state`（单终端即可看到状态数字）；主节点在画面上叠加当前检测器模式（`detector: bbox/pose`，便于截图自证）；把两份评测汇总加入 `.gitignore` 白名单随仓库提交；每处验证步骤补「预期效果」（含常见异常判据）；`docs/notes.md` 同步重编目录（两级索引 + 状态标签）并新增 §22「与 README 的双向对照」 |
-| **v3.4** | 2026-09-11 | 职责收窄：`scripts/demo.sh`（会启动程序）改为 **`scripts/setup.sh`（只配置环境 + 构建，不启动任何程序）**，启动入口统一收敛到 `ros2 launch`；`setup.sh` 会自动探测 ONNX Runtime / MVS SDK 并把 bbox 与 pose 两条通路都编好，收尾打印两条素材 demo.avi 的启动命令；更换带 `detector: pose` 标签的 rqt 截图 |
-| **v3.5** | 2026-09-11 | 突出核心：顶部「快速开始」只引导到题3（clone → `scripts/setup.sh` → `ros2 launch`）；原「30 秒快速验证」改为 **「快速验证（题3：两种素材 × 两种检测器）」**，只保留题3 的 4 条命令（demo 视频 / 海康相机流 × bbox / pose）与各自预期效果，题1、题2 的验证命令回归各自小节 |
-| **v3.6** | 2026-09-11 | 如实标注模型强弱：说明 **bbox 模型是本仓库自训（训练量小、效果一般）**，**推荐使用深大 26 开源的 pose 模型**并标注其来源；新增文末 **「参考仓库与教程」**（10 条带链接，首位即深大 RobotPilots 的模型开源帖） |
-| **v3.7** | 2026-09-11 | 文档分层：原 `docs/notes.md` 整体改名为 **`docs/log.md`（过程日志，内容与章号一字不改）**；新建 **`docs/notes.md`（按主题归纳的总结，9 节，每条结论标注 `log.md §` 出处）**；README 中原先指向"过程/证据"的引用统一改指 `log.md`，并新增指向归纳笔记的入口；完成 README ↔ notes ↔ log 三重交叉验证 |
-| **v3.8** | 2026-09-11 | 顶部重排为**三步**（clone → 环境配置 → 快速验证）消除原「快速开始/快速验证」的重合；新增 **`scripts/check_env.sh` 环境自检脚本**（逐项检查系统/工具链/ROS2 与所需包/colcon/OpenCV/可选 ORT 与 MVS SDK/仓库素材，缺失项直接给出安装命令，退出码可判成败）；「环境与依赖」补指向自检的入口 |
-| **v3.9** | 2026-09-11 | 顶部与文末新增「**代码来源与用途声明**」：明确**代码实现由 AI 工具 DSH 生成**，本人负责需求拆解/技术路线与取舍/代码审查与修改意见/验收纠错/笔记组织，**仅作学习记录、未经生产验证**；`log.md` 与 `notes.md` 顶部同步加精简声明；同时撤回上一版试做的阅读状态标注 |
-| **v3.10** | 2026-09-12 | 修"干净环境跑 pose 失败"的体验问题：① `scripts/setup.sh` / `check_env.sh` 的 ONNX Runtime 探测扩到多个候选路径（含仓库上两级、`/opt`、`/usr/local`、`$HOME`），未找到时明确提示用 `ORT_DIR=…` 重跑，并警告不启用 ORT 时 pose 会直接报错；② launch 用 **`RegisterEventHandler(OnProcessExit …) + Shutdown`** 实现"主节点一退出、launch 立即整体退出"（试过 `Node(required=True)`，但 **Humble 不支持该参数**），不再留一个空 rqt 窗口；③ 「快速验证」把"pose 需要 ONNX Runtime"提为**显式前置**，并给出下载/解压/重构建的四行命令；④ FAQ 新增"窗口打开了但没有图像"一条 |
-| **v3.11** | 2026-09-12 | 让"clone 者照 README 复制粘贴"就能看到效果：ONNX Runtime 探测新增 **ROS 官方 vendor 包路径**（`/opt/ros/$ROS_DISTRO/opt/onnxruntime_vendor`，实测可直接当 `ORT_DIR` 用）与 `third_party/onnxruntime`；未找到时提示改为**首选 `apt install ros-humble-onnxruntime-vendor`**、备选下载解压；「快速验证」改为**先跑零依赖的 ①（bbox）、再按需升级 ②（pose）**；FAQ 补 `pip install onnxruntime` 混淆一条；顶部注明"不装 ORT 也能完整跑通三题" |
-| **v3.12** | 2026-09-12 | 明确"哪里能用 pose"：题1/题2 的 `armor_demo` / `corner_demo` / `pnp_demo` / `tracker_demo` / `lightbar_demo` **都只支持 bbox**（学习阶段就是按 bbox 走的）；**pose 是最后优化阶段引入的**，只用于**题3 的完整链路**与**题2 的评测工具 `eval_demo`** —— 在题1 开头、两题的「快速验证」与「命令行通用约定」表里都写清楚（曾尝试给这些 demo 加 `detector` 参数，评估后**放弃并回档**，避免改动稳定代码） |
-| **v3.13** | 2026-09-12 | 修 `scripts/setup.sh`：**ORT 开关此前只传给题3 的 colcon，没给题1/题2 的普通 CMake** —— 实测这会让 clone 者编出的 `build/02_tracker/eval_demo` 是 `USE_ONNXRUNTIME=OFF`，于是 README 题2 快速验证第 3 条（复现 687 帧 A/B 表）直接抛异常；现改为 ORT 开关同时传给 01/02 的 `cmake -S`（探不到 ORT 时不加，行为不变）。顺带把"pose 可用于哪里"的措辞统一为：**题3 完整链路 + 题2 的离线评测基础设施 `eval_demo`** |
-| **v3.14** | 2026-09-12 | 按 clone 者反馈修订：① 「构建」与「04_hik」开头注明"**已跑过 `setup.sh` 可跳过**"；② 明确 `setup.sh` **也覆盖海康模块**（自动开 `USE_HIK_SDK` 并构建 `04_hik`，现场只需装 MVS + 填序列号）；③ **更正"真实相机"的表述**——验证用的是**手机 IP Webcam 对着笔记本屏幕回放 `demo.avi`**（二次成像），既不是真实场地/实车、也不是工业相机；标题与措辞统一改为「相机通路验证」；④ 题1 产物补"预览图开头几张可能没有目标"的说明；⑤ 「环境与依赖」里的自检指引收成一行 |
-| **v3.15** | 2026-09-12 | 新增 **`scripts/check_docs.sh` 文档自检脚本**（校验：代码栅栏配平 / 代码块内无尖括号占位符 / 修订记录版本号升序 / `§` 交叉引用有效 / 引用的仓库文件存在；退出码可判成败）—— 用历史上真实犯过的 4 类错误自测过，全部能被抓出；「目录结构」「文件清单」与「第二步」挂上入口 |
-| **v3.16** | 2026-09-12 | 修编辑器体验：`04_hik` 的源文件在 clangd 里报找不到 `MvCameraControl.h` —— 原因是 **clangd 只就近读一个 `compile_commands.json` 且不合并**，而根目录那个软链指向的是题3 的 DB（含 01/02/03、不含 04_hik）；`setup.sh` 现在会在 `./`、`01_detector/`、`02_tracker/`、`04_hik/` 各建一条软链指向对应构建目录，README「构建」与 FAQ 同步说明 |
-| **v3.17** | 2026-09-12 | **修"接上真机反而没画面"的致命问题**（真机实测反馈）：`source:=hik` 时相机输出 `BayerRG8`（`0x01080009`），而原实现只认 `BGR8_Packed`/`Mono8` → **每帧都被跳过**、画面全空（节点进程还活着，所以 `ros2 launch` 看似正常）。现在 ① 新增 `frameToBgr()` 统一转换七种格式（BGR8 / RGB8 / Mono8 / BayerRG8·GR8·GB8·BG8）；② `data/camera.yaml` 新增 `pixel_format` / `adc_bit_depth` / `trigger_mode` / `format` 四项（键名对齐战队自家项目 yaml；前三项以"请求"发给相机、不支持时只警告、**留空 = 不碰相机**）；③ 首帧打印相机实际输出格式、不支持的格式按帧计数提示。**顺带修正一个会让红蓝互换的坑**：OpenCV 与 GenICam 的 Bayer 命名错开一格（`BayerRG8` 必须用 `COLOR_BayerBG2BGR`），并用合成帧白盒测试（四种相位 × 四个转换码）验证，并与同济/武科大两个参考项目实际调用的枚举值（46）一致；FAQ / 相机通路 / 04_hik / 证据索引 / `notes.md` 踩坑表同步更新；另修正 FAQ 里"主节点 `required=True`"的过时表述（Humble 的 `Node` 无此参数，实际是用 `OnProcessExit + Shutdown` 实现） |
-| **v3.18** | 2026-09-12 | 修正「参考仓库与教程」表：其中 5 条原先是**社区帖链接而不是仓库**，现改为对应的 GitHub 仓库并把社区原帖留作出处——深大 26 模型 → `SZURPVision/26_NNDeployment_Lib_and_Detection_Models`、河科 26 仿真器 → `Blackjack200/bevy_robomaster_simulator`、河科 26 模型 → `PraySky1337/AT_NN_Detector`、武科 26 视觉 → `WUST-RM/awakening`、深大 24 模型 → `broalantaps/RobotDetectionModel`（5 个仓库均逐一核实存在且公开） |
+| v1.0 | 2026-09-08 | 三题初稿：运行说明 + 证据截图 |
+| v2.0 | 2026-09-09 | 复盘后重构：三题并列结构、状态总览、题2 运行与指标、FAQ、参考资料对照；修录屏死链 |
+| v3.0 | 2026-09-11 | **功能里程碑**：按考核题面重写全文 —— ② 评测基础设施（口径 + 687 帧 A/B）与角点精修负结果、③ 四关键点检测器接入；补「考核要求对照」、`04_hik`、证据索引、许可说明 |
+| v3.1 | 2026-09-11 ~ 09-12 | **文档、工具与体验定型**：权重入库（`models/third_party/` + `SOURCE.md`）与许可按内容分层；三步快速开始（clone → 环境 → 验证）+ 命令行通用约定 + 文件清单 + 每题"一般用法 → 快速验证 → 产物"；`setup.sh`（只配置与构建）+ `check_env.sh` + `check_docs.sh`；ONNX Runtime 探测（含 ROS vendor 包）与 pose 可用范围写清；launch 主节点退出即整体退出；FAQ 与「预期效果」补齐；四个工程目录 `compile_commands.json` 软链（修 clangd 找不到 MVS 头文件）；文档分层（`log.md` 过程日志 + `notes.md` 归纳 + 三重交叉验证）；AI 使用声明；参考仓库表链接修正为真实仓库 |
+| v3.2 | 2026-09-12 | **功能里程碑**：真实相机接入修复 —— 海康像素格式兼容（Bayer / Mono8 / RGB8 → BGR），并修正 Bayer 相位（原来会红蓝互换）；`data/camera.yaml` 增 4 个相机侧参数（`pixel_format` / `adc_bit_depth` / `trigger_mode` / `format`） |
 
 ---
 
