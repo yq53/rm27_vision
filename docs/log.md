@@ -1222,6 +1222,20 @@ v2：框内**灯条精定位**（灯条端点 → 更准的四角点 → PnP 更
 ② 设置顺序改为 `ADCBitDepth → PixelFormat → TriggerMode`（父设置先于子设置，避免设完又被父设置重置）；
 ③ 设完回读校验；④ 把上面那个合成帧白盒测试程序入库（现为临时文件，方法已完整记录在本节）。
 
+### 19.11 补记：`LD_LIBRARY_PATH` 的适用范围更正（2026-09-15）
+
+§19.3 与 §22.4 记的"运行期**不需要** `LD_LIBRARY_PATH`"（依据：CMake 已把 `/opt/MVS/lib/64` 写进 RUNPATH），
+**只对 `04_hik` 的三个程序成立**——2026-09-15 复核发现它此前被 README / `notes.md` 当成通用结论在用，实际不成立：
+
+| 可执行文件 | RUNPATH（`readelf -d`） | 清空 `LD_LIBRARY_PATH` 后（`env -u LD_LIBRARY_PATH ldd …`） |
+|---|---|---|
+| `build/04_hik/hik_grab` | `/opt/MVS/lib/64:/usr/local/lib` | ✅ 仍解析到 `libMvCameraControl.so` |
+| `install/rm_armor_visualization/lib/rm_armor_visualization/armor_tracker_node` | `[…/.models_ext/onnxruntime/lib]`（**不含 MVS**） | ❌ `libMvCameraControl.so => not found`（而 `libonnxruntime.so.1` 仍能解析 → 它来自 RUNPATH） |
+
+推论：**题3 主节点在 `source:=hik` 时依赖 `LD_LIBRARY_PATH`**——由 `armor_tracker.launch.py` 的 hik 分支自动设置
+（§19.9 "环境变量自动化"就是为它准备的），所以**经 launch 启动无需手工设置**；用 `ros2 run` 手工启动则要自己 export。
+README「04_hik」与 `notes.md` §6 已按此更正口径。
+
 ## 20. 四关键点模型接入与评测体系（2026-09-10）
 
 ### 20.1 为什么做这条线

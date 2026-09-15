@@ -34,7 +34,7 @@ from launch_ros.actions import Node
 
 
 def _launch_setup(context, *args, **kwargs):
-    source = LaunchConfiguration("source").perform(context)
+    source = LaunchConfiguration("source").perform(context) # 执行阶段立即取值
     repo_root = LaunchConfiguration("repo_root")
 
     if source not in ("video", "ip", "hik"):
@@ -42,20 +42,21 @@ def _launch_setup(context, *args, **kwargs):
             f"source 必须是 video / ip / hik 之一，当前为 '{source}'"
         )
 
-    actions = []
+    actions = []    # 创建动作列表
 
     # ① 环境变量：RMW 用 FastDDS（本机 CycloneDDS 传大图像不稳）
-    actions.append(SetEnvironmentVariable("RMW_IMPLEMENTATION", LaunchConfiguration("rmw")))
+    actions.append(SetEnvironmentVariable("RMW_IMPLEMENTATION", LaunchConfiguration("rmw")))    # 设置环境变量(环境变量名, value)
 
     # ② hik 模式：把 MVS 库目录前置到 LD_LIBRARY_PATH（进程级，不改 .bashrc）
     if source == "hik":
         actions.append(
             SetEnvironmentVariable(
                 "LD_LIBRARY_PATH",
+                # 列表。逐段拼接成一个字符串
                 [
                     LaunchConfiguration("mvs_lib_dir"),
                     ":",
-                    EnvironmentVariable("LD_LIBRARY_PATH", default_value=""),
+                    EnvironmentVariable("LD_LIBRARY_PATH", default_value=""),   # 读取环境变量
                 ],
             )
         )
@@ -63,7 +64,7 @@ def _launch_setup(context, *args, **kwargs):
     # ③ source -> 节点参数 的映射（node 本身只认 video_path / camera_config）
     if source == "hik":
         source_param = {
-            "camera_config": PathJoinSubstitution(
+            "camera_config": PathJoinSubstitution(  # 安全拼接路径（自动处理分隔符）
                 [repo_root, LaunchConfiguration("camera_config")]
             )
         }
@@ -81,15 +82,15 @@ def _launch_setup(context, *args, **kwargs):
         source_desc = "video (本地文件)"
 
     params = dict(source_param)
-    params["model_path"] = PathJoinSubstitution([repo_root, LaunchConfiguration("model_path")])
+    params["model_path"] = PathJoinSubstitution([repo_root, LaunchConfiguration("model_path")]) # 直接交给Node，延迟到运行时求值
     params["detector"] = LaunchConfiguration("detector")
     if LaunchConfiguration("pose_model_path").perform(context):
         params["pose_model_path"] = PathJoinSubstitution(
             [repo_root, LaunchConfiguration("pose_model_path")]
         )
 
-    actions.append(LogInfo(msg=f"[armor_tracker.launch] 图像源 = {source_desc}"))
-    tracker_node = Node(
+    actions.append(LogInfo(msg=f"[armor_tracker.launch] 图像源 = {source_desc}"))   # 终端打印
+    tracker_node = Node(    # 启动一个节点进程
         package="rm_armor_visualization",
         executable="armor_tracker_node",
         name="armor_tracker_node",
@@ -101,6 +102,7 @@ def _launch_setup(context, *args, **kwargs):
     # 就让整个 launch 跟着退出——否则 rqt 窗口会空着，看起来像"启动了但没图像"，
     # 很难意识到节点其实已经死了。（Node 本身没有 required 参数，用事件处理器实现）
     actions.append(
+        # 进程推出后，做...
         RegisterEventHandler(
             OnProcessExit(
                 target_action=tracker_node,
@@ -110,7 +112,7 @@ def _launch_setup(context, *args, **kwargs):
                         "常见原因：detector:=pose 但构建时未启用 ONNX Runtime；"
                         "或视频/模型/相机路径不对 —— 具体原因见上面节点打印的 ERROR。"
                     ),
-                    EmitEvent(event=Shutdown(reason="主节点已退出")),
+                    EmitEvent(event=Shutdown(reason="主节点已退出")),   # 发出“整体关闭”事件
                 ],
             )
         )
@@ -122,7 +124,7 @@ def _launch_setup(context, *args, **kwargs):
             package="rqt_image_view",
             executable="rqt_image_view",
             arguments=["/armor/annotated"],
-            condition=IfCondition(LaunchConfiguration("use_rqt")),
+            condition=IfCondition(LaunchConfiguration("use_rqt")),  # 条件执行(配condition=)
             output="screen",
         )
     )
@@ -138,10 +140,12 @@ def _launch_setup(context, *args, **kwargs):
     )
     return actions
 
-
+# launch调用的入口
 def generate_launch_description():
+    # 返回“动作列表”
     return LaunchDescription(
         [
+            # 声明launch参数(仅活在launch进程里；名字, 默认值, 描述)
             DeclareLaunchArgument("source", default_value="video", description="图像源: video | ip | hik"),
             DeclareLaunchArgument("video_path", default_value="data/demo.avi", description="source:=video 时的视频路径"),
             DeclareLaunchArgument("ip_url", default_value="", description="source:=ip 时的流地址(如 http://<IP>:8080/video)"),
@@ -154,6 +158,6 @@ def generate_launch_description():
             DeclareLaunchArgument("print_state", default_value="false", description="是否附带启动 armor_state_printer(把 /armor/state 打到终端)"),
             DeclareLaunchArgument("rmw", default_value="rmw_fastrtps_cpp", description="RMW 实现(本机需 FastDDS)"),
             DeclareLaunchArgument("mvs_lib_dir", default_value="/opt/MVS/lib/64", description="source:=hik 时的 MVS 库目录"),
-            OpaqueFunction(function=_launch_setup),
+            OpaqueFunction(function=_launch_setup), # 逃生舱:把python函数塞进动作列表，拿到运行时context
         ]
     )

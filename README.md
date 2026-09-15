@@ -834,9 +834,13 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
   `hik_grab` 会在 `results/` 下写出首帧图片（`hik_grab_0000.png`）。
 - **常见异常**：报找不到 `libMvCameraControl.so` → 见下面那条；`hik_grab` 的取帧数传了非数字 → 进程 abort（退出 134）。
 
-- 本机实测**不需要**手工设 `LD_LIBRARY_PATH`（CMake 已把 `/opt/MVS/lib/64` 写进可执行文件的 RUNPATH，
-  可 `readelf -d build/04_hik/hik_grab | grep -i path` 查看）。若你的环境仍报找不到 `libMvCameraControl.so`，
-  再 `export LD_LIBRARY_PATH=/opt/MVS/lib/64:$LD_LIBRARY_PATH`。
+- **`04_hik` 的三个程序不需要**手工设 `LD_LIBRARY_PATH`：CMake 已把 `/opt/MVS/lib/64` 写进它们的 RUNPATH
+  （可 `readelf -d build/04_hik/hik_grab | grep -i path` 查看）。
+- **但题3 的主节点不一样**：`install/…/armor_tracker_node` 的 RUNPATH 只含 ONNXRuntime、**不含 MVS**，
+  所以 `source:=hik` 时 `libMvCameraControl.so` 依赖 `LD_LIBRARY_PATH`——**launch 的 hik 分支已自动设好**
+  （`armor_tracker.launch.py`），经 launch 启动无需手工设置；用 `ros2 run` 手工启动则要自己
+  `export LD_LIBRARY_PATH=/opt/MVS/lib/64:$LD_LIBRARY_PATH`。
+  （实测：清空该变量后 `ldd` 报 `libMvCameraControl.so => not found`，而 `libonnxruntime.so.1` 仍能从 RUNPATH 解析 → `log.md §19.11`）
 - 取帧数传非数字会抛未捕获异常、进程 abort（退出 134）——传数字即可。
 - 主节点用的是封装后的版本（`image_source.cpp` 的 `#ifdef RM_USE_HIK_SDK` 段 + `data/camera.yaml`）：
   **现场展示只需改 `data/camera.yaml` 里的 `serial_number`，代码不用动**；像素格式适配（Bayer/Mono8/RGB8 → BGR）
@@ -949,6 +953,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | v3.0 | 2026-09-11 | **功能里程碑**：按考核题面重写全文 —— ② 评测基础设施（口径 + 687 帧 A/B）与角点精修负结果、③ 四关键点检测器接入；补「考核要求对照」、`04_hik`、证据索引、许可说明 |
 | v3.1 | 2026-09-11 ~ 09-12 | **文档、工具与体验定型**：权重入库（`models/third_party/` + `SOURCE.md`）与许可按内容分层；三步快速开始（clone → 环境 → 验证）+ 命令行通用约定 + 文件清单 + 每题"一般用法 → 快速验证 → 产物"；`setup.sh`（只配置与构建）+ `check_env.sh` + `check_docs.sh`；ONNX Runtime 探测（含 ROS vendor 包）与 pose 可用范围写清；launch 主节点退出即整体退出；FAQ 与「预期效果」补齐；四个工程目录 `compile_commands.json` 软链（修 clangd 找不到 MVS 头文件）；文档分层（`log.md` 过程日志 + `notes.md` 归纳 + 三重交叉验证）；AI 使用声明；参考仓库表链接修正为真实仓库 |
 | v3.2 | 2026-09-12 | **功能里程碑**：真实相机接入修复 —— 海康像素格式兼容（Bayer / Mono8 / RGB8 → BGR），并修正 Bayer 相位（原来会红蓝互换）；`data/camera.yaml` 增 4 个相机侧参数（`pixel_format` / `adc_bit_depth` / `trigger_mode` / `format`） |
+| v3.3 | 2026-09-15 | **文档事实更正**：`LD_LIBRARY_PATH` 的适用口径 —— 原写"不需要"只对 `04_hik` 的程序成立；**题3 主节点在 `source:=hik` 时依赖它**（实测清空该变量后 `ldd` 报 `libMvCameraControl.so => not found`），launch 的 hik 分支已自动设置，`ros2 run` 手工启动需自行 export（`log.md §19.11`） |
 
 ---
 

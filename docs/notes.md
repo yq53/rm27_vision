@@ -123,7 +123,7 @@
 | `[ros2run]: Aborted` / spdlog `Read-only file system` | `~/.ros` 不可写 → `export ROS_LOG_DIR=$PWD/.roslog` | `log.md §17.4` |
 | 手机流 "Stream ends prematurely" | URL 少了 `/video` 后缀 | `log.md §17.4` |
 | 检测框在但 z<0 / 距离乱跳 | 手机竖屏产生 90° 旋转元数据 → 镜像假解，务必横屏 | `log.md §17.4` |
-| 海康程序报找不到 `libMvCameraControl.so` | 一般**不需要**设 `LD_LIBRARY_PATH`（CMake 已写入 RUNPATH）；只有换环境才要 | `log.md §19.3` |
+| 报找不到 `libMvCameraControl.so` | **先分清是哪个程序**：`04_hik` 的三个程序**不需要**设（CMake 已写入 RUNPATH）；**题3 主节点需要**（它的 RUNPATH 只含 ONNXRuntime）——launch 的 hik 分支已自动设好，`ros2 run` 手工启动才要自己 export | `log.md §19.11` |
 | 设了 `RM_CORNER_DEBUG=0` 也落盘调试图 | 源码判断是 `getenv() != nullptr`，**传任意值都触发** | 本轮实测（README） |
 | `scripts/setup.sh` 探不到 ONNX Runtime | 用 `ORT_DIR=/你的/onnxruntime bash scripts/setup.sh` 指定 | `README.md`「第二步：环境配置」 |
 | 想让"主节点退出 ⇒ launch 一起退出" | Humble 的 `Node` **不支持** `required=True`（会报 `unexpected keyword argument 'required'`）；要用 `RegisterEventHandler(OnProcessExit(target_action=节点, on_exit=[EmitEvent(event=Shutdown())]))` | 本轮实测（`armor_tracker.launch.py`） |
