@@ -142,8 +142,8 @@ public:
             declare_parameter<std::string>("camera_config", "");
         const std::string video_path =
             declare_parameter<std::string>("video_path", "data/demo.avi");
-        const std::string model_path =
-            declare_parameter<std::string>("model_path", "models/armor_yolov8n.onnx");
+        const std::string bbox_model_path =
+            declare_parameter<std::string>("bbox_model_path", "models/armor_yolov8n.onnx");
         // 检测器选择：bbox（自训 bbox 模型）/ pose（四关键点模型，直接输出灯条端点）
         const std::string detector_kind = declare_parameter<std::string>("detector", "bbox");
         const std::string pose_model_path =
@@ -160,11 +160,11 @@ public:
             object_points_ = barEndObjectPoints();
             RCLCPP_INFO(get_logger(), "检测器: pose（四关键点）%s", pose_model_path.c_str());
         } else {    // bbox detector
-            detector_ = std::make_unique<ArmorDetector>(model_path);
+            detector_ = std::make_unique<ArmorDetector>(bbox_model_path);
             detector_->setConfidenceThreshold(0.35f);
             detector_->setNmsThreshold(0.45f);
             object_points_ = plateObjectPoints();
-            RCLCPP_INFO(get_logger(), "检测器: bbox %s", model_path.c_str());
+            RCLCPP_INFO(get_logger(), "检测器: bbox %s", bbox_model_path.c_str());
         }
         detector_label_ = pose_detector_ ? "pose" : "bbox"; // 与实际上走的通路一致，供画面标注
 

@@ -1457,3 +1457,93 @@ README「04_hik」与 `notes.md` §6 已按此更正口径。
 - `mAP50≈0.97` 与 `armor_demo 54.5 ms` 两个数字来自训练记录与历史复跑（§3），**本仓库无法从代码复算**；
   README 已注明其出处为本笔记。
 
+## 23. 题3 launch / 参数注入 / 编译链接加载机制的概念梳理（2026-09-15）
+
+> 本章把"逐行读 `armor_tracker.launch.py`"几轮问答沉淀成可复习的结论，每条都附当时跑出来的证据。
+
+### 23.1 launch 的两个阶段与 Substitution
+
+| 阶段 | 谁在工作 | 能拿到参数值吗 | 对应代码 |
+|---|---|---|---|
+| **构造阶段** | `generate_launch_description()` | **不能**（值在运行时 context 里） | 文件末尾的 `LaunchDescription([...])` |
+| **执行阶段** | launch 服务逐个执行 Action | 能（有 `context`） | `_launch_setup(context, ...)` |
+
+- **`LaunchConfiguration("x")` 是惰性引用**：构造它不读任何值，只造一个"到时去 context 查 x"的对象；真正的键值在 `context.launch_configurations` 里（`DeclareLaunchArgument` 写默认值、命令行 `x:=…` 覆盖）。
+- **`LaunchConfiguration("x") == "hik"` 恒为 False**（对象比较）→ 必须 `.perform(context)` 才拿到字符串。这是 launch 写法最常见的坑。
+- **`.perform(context)` 与"不 perform"的区别不是"阶段"**（`_launch_setup` 本身就在执行阶段），而是：**时点**（我这一行就求值 vs 框架用到它时再求值）、**语义**（得到冻结的字符串 vs 保留 `default=`/拼接/条件等引用语义）、**出错时机**（立即抛 `SubstitutionFailure` vs 推迟）。
+- 因为 `.perform` 会立即抛错，**`DeclareLaunchArgument` 必须排在 `OpaqueFunction` 之前**——在 launch 里"顺序就是依赖"。
+- **`OpaqueFunction` 是"逃生舱"**：声明式表达不了"按真值改变动作**结构**"（换参数名、增删动作、启动即报错）；它把一段 Python 函数挂进动作列表，执行到时调用，**用其返回值作为后续动作**。"opaque" 指框架看不透这个动作会产出什么。
+- **"开关" vs "结构变化"**：`IfCondition` 只能让某动作执行/不执行（`use_rqt`/`print_state`）；而"hik 传 `camera_config`、video 传 `video_path`"是**结构变化**，只能用 Python 分支。
+
+**五个"名字"层**（读任何 launch/ROS 工程都要先分清）：
+
+| 层 | 例子 | 谁在用 |
+|---|---|---|
+| 仓库（git / colcon 工作区根） | `rm27_vision` | `git clone`、colcon |
+| 目录 | `03_visualization` | 人看的（按考核题号组织） |
+| **ROS 包名**（`package.xml` 的 `<name>`） | `rm_armor_visualization` | `ros2 launch` / `ros2 run` / `ros2 pkg` |
+| 可执行文件 | `armor_tracker_node` | `ros2 run <包名> <可执行名>` |
+| 运行节点名 | `/armor_tracker_node` | `ros2 node info` / `ros2 param` |
+
+- **`Node`（launch 的动作）≠ 节点（运行时实体）**：前者是"启动蓝图"（Python 对象，活在 launch 进程），后者是 `fork/exec` 之后 `rclcpp::Node` 的实例。
+- `name=` 不是"记录名字"，而是拼成 **`-r __node:=<name>` 重映射**（`launch_ros/actions/node.py` 里就是这么拼的）；`namespace=` 同理走 `__ns:=`。
+
+### 23.2 参数注入链与"名字契约"
+
+- 链路：**命令行 launch 参数 →（`_launch_setup` 翻译）→ 节点参数 →（`--params-file` 临时 YAML）→ 节点 `declare_parameter`**。实测 launch 用的是 `--params-file /tmp/launch_params_xxx`，不是直传 `-p key:=value`。
+- 12 个 launch 参数分两类：**只被 launch 消费**（`source`/`repo_root`/`use_rqt`/`print_state`/`rmw`/`mvs_lib_dir`）与**转发给节点**（`video_path`/`camera_config`/`bbox_model_path`/`detector`/`pose_model_path`）。
+- **名字是隐式契约、没有类型检查**：实测把 `detector` 拼成 `detectorr` → 节点**一声不吭**照常启动、按默认 `bbox` 跑，无任何警告 → **改名必须两侧同时改**。
+- **空字符串是"未启用"的哨兵**：`pose_model_path` 默认空 → launch 只在非空时才塞进 params（`if LaunchConfiguration("pose_model_path").perform(context):`，Python 真值判断），节点侧再对"`detector:=pose` 但没给路径"抛错（fail fast）；`detector`/`bbox_model_path` 有非空默认值 → 无条件传。
+- **只有 `detector` 决定用哪个模型**：节点里两个 `unique_ptr` 二选一（`onTimer()` 用 `if (pose_detector_)` 分流）；两个 `*_model_path` 只是两条路线各自的资源，同时给也不会冲突。
+- 本轮据此把 `model_path` 改名为 `bbox_model_path`（见 §23.5）。
+
+### 23.3 环境变量两例：RMW 与 LD_LIBRARY_PATH
+
+- **RMW**：ROS 2 的可插拔通信抽象层。`rmw_fastrtps_cpp` = Fast DDS（eProsima）的 C++ 实现；本机只装了 `librmw_fastrtps_cpp.so` 与 `librmw_cyclonedds_cpp.so` 两个实现。
+- **`librmw_implementation.so` 是"转发层"**：它提供 RMW 的 C API，按 `RMW_IMPLEMENTATION` **在运行时加载**具体实现（证据：`ldd` 里没有任何实现依赖、二进制内含字符串 `RMW_IMPLEMENTATION`）。选择是**每个进程各选一次** → 所以"发布端与订阅端必须一致"。
+- **本机实测**：`~/.bashrc:122` 设的是 `rmw_cyclonedds_cpp`，launch 把它覆盖成 `rmw_fastrtps_cpp` → 经 launch 启动的节点跑 FastDDS，**别的终端（`ros2 topic echo`、rqt）仍走 CycloneDDS**，这正是 §17.4"跨 RMW 传大图丢包（≈26 Hz → ≈1.9 Hz）"的成因。
+- **DDS**：OMG 的发布/订阅中间件标准（Domain / Topic / DataWriter-DataReader / **QoS** / Discovery / CDR）。ROS 2 用它取代 ROS 1 的 `roscore`，换来去中心化自动发现与可协商 QoS。QoS 兼容规则是"提供的 ≥ 请求的"：发布 RELIABLE + 订阅 BEST_EFFORT ✅；反向 ❌ 且**静默收不到**。
+- **`SetEnvironmentVariable`**：写进 launch context 的环境，**只影响之后启动的子进程**（不写 `~/.bashrc`），因此**必须排在 Node 之前**。
+- **`LD_LIBRARY_PATH` 的拼接写法**：`[mvs_lib_dir, ":", EnvironmentVariable("LD_LIBRARY_PATH", default_value="")]` = 列表逐段拼成字符串（**前置而非覆盖**）；`default_value=""` 是为了旧值不存在时不抛错。旧值为空时会留下尾随冒号，而 `man 8 ld.so` 明确"**零长目录名表示当前工作目录**"。
+
+### 23.4 编译 / 链接 / 加载：四类文件与五级搜索顺序
+
+| 文件 | 是什么 | 出现在哪个阶段 | 证据 |
+|---|---|---|---|
+| `.hpp/.h` | **声明**（预处理时文本插入） | 编译期 | — |
+| `.o` | 编译单元：机器码 + 符号表 | 编译产物 | `file` → `ELF … relocatable` |
+| `.a` | 一堆 `.o` 的 `ar` 归档 | 链接期**按需抽取并拷入** | 文件头 `!<arch>`、`ar t` 列出成员 |
+| `.so` | 可被多进程共享的机器码 | **启动时**由 `ld.so` 解析 | `file` → `ELF … shared object` |
+
+- 本项目 **6 个自研算法库全是 `.a`**（`libarmor_detector` / `libarmor_pose_detector` / `libarmor_pnp` / `libarmor_ekf` / `libarmor_corner` / `liblight_bar_detector`）；第三方与系统库是 `.so`；题3 节点的 `NEEDED` 有**上百条**。
+- **`ld.so` 五级搜索顺序**（`man 8 ld.so`）：`DT_RPATH` → **`LD_LIBRARY_PATH`** → `DT_RUNPATH`（只对直接依赖生效）→ `/etc/ld.so.cache` → `/lib`、`/usr/lib`。
+- **实测（清空 `LD_LIBRARY_PATH` 后跑 `ldd`）**：
+
+| 库 | 位置 | 还能找到吗 | 靠哪一级 |
+|---|---|---|---|
+| libc / libstdc++ / libm / libgcc_s | `/lib/x86_64-linux-gnu` | ✅ | 缓存 / 默认目录 |
+| `libopencv_*.so.413` | `/usr/local/lib` | ✅ | **缓存**（`/etc/ld.so.conf.d/libc.conf` 含 `/usr/local/lib`） |
+| `libonnxruntime.so.1` | `.models_ext/onnxruntime/lib` | ✅ | **RUNPATH**（`01_detector/CMakeLists.txt` 的 `-Wl,-rpath`，PUBLIC 传播到 03） |
+| **整套 ROS 库 + `rm_interfaces`** | `/opt/ros/humble/lib`、`install/…/lib` | ❌ not found | **`LD_LIBRARY_PATH`**（由 `setup.bash` 注入） |
+| **`libMvCameraControl.so`** | `/opt/MVS/lib/64` | ❌ not found | **`LD_LIBRARY_PATH`**（题3：launch/.bashrc；04_hik：RUNPATH） |
+
+- 结论：**"要不要环境变量"取决于库放在哪、有没有别的机制能找到它**，与静态/动态无关。launch 那行必须"前置拼接"——若覆盖，连 `rclcpp` 都加载不了（详见 §19.11）。
+- **CMake 的 RPATH 策略**（实测差异）：build 树二进制的 RUNPATH 含 `/opt/MVS/lib/64`、`/opt/ros/humble/lib`、`/usr/local/lib`；**install 时会被替换成 `INSTALL_RPATH`（默认空）**，只有原始 `-Wl,-rpath` 留下的那条保留 → 这就是"build 目录里能跑、装完找不到库"的原因。
+- **`.so` 三段式命名**：`libopencv_core.so`（链接名）→ `.so.413`（SONAME，写进 NEEDED）→ `.so.4.13.0`（真实文件）；主版本进位 = ABI 不兼容，也是 `libcv_bridge`(4.5) 与本节点(4.13) 冲突警告的来源。
+
+### 23.5 本轮落地变更：`model_path` → `bbox_model_path`
+
+- 动机：与 `pose_model_path` **对称**，避免"这个 model 指哪个模型"的歧义。
+- 改动 **4 处（缺一不可，否则静默失效）**：launch 的 `params[...]` 与 `DeclareLaunchArgument(...)`、节点 `declare_parameter`（含同名局部变量）、README 参数表。
+- **验收三步（实测通过）**：① `--show-args` 显示新名字 ✅；② 传 `bbox_model_path:=/tmp/nope.onnx` → 节点真去读它并报 `Can't read ONNX file`、退出 255（证明契约真的接上了）✅；③ 默认运行 → `检测器: bbox models/armor_yolov8n.onnx` + `publishing /armor/annotated & /armor/state` + `armor_state_printer` 打出 `d=…` ✅。
+- **有意未改**：01/02 库的 C++ 形参/局部变量 `model_path`（与 ROS 参数无关）、`armor_video_node` 自己的 `model_path` 参数（另一个节点，不在本 launch 内）、本章之前的历史记录。
+
+### 23.6 自测题（能不看代码答出来就算过关）
+
+1. `generate_launch_description()` 里为什么写不出 `if source == "hik"`？
+2. `LaunchConfiguration("x") == "v"` 为什么恒假？`.perform(context)` 到底做了什么？
+3. `OpaqueFunction` 解决的是哪一类问题？为什么叫"逃生舱"？
+4. `-L` / `RUNPATH` / `LD_LIBRARY_PATH` / `ldconfig` 分别在什么阶段、给谁用？
+5. 为什么 launch 里设 `LD_LIBRARY_PATH` 必须"前置拼接"而不是覆盖？覆盖会先坏掉哪个库？
+6. 参数名写错会发生什么？给出一条能验证"契约接上了"的命令。
+

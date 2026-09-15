@@ -9,7 +9,7 @@
 
 视觉方向三小题的完整实现：**装甲板识别（detector）→ 装甲板跟踪（tracker）→ 接入相机 + 可视化**。
 按题分目录组织，每部分可独立构建、运行、复现；学习过程、原理问答、踩坑与负结果的完整记录见
-`docs/log.md`（过程日志，23 章：问答/推导/踩坑/负结果原文）+ `docs/notes.md`（按主题归纳的速查总结）。
+`docs/log.md`（过程日志，24 章：问答/推导/踩坑/负结果原文）+ `docs/notes.md`（按主题归纳的速查总结）。
 
 - 代码：C++17 + OpenCV（题1 / 题2 为普通 CMake，题3 为 ROS2 Humble ament / colcon）
 - 素材：`data/demo.avi`（687 帧，自录，**只作测试集、永不进训练**）；模型全部随仓库提供
@@ -218,7 +218,7 @@ rm27_vision/
 ├── rm_interfaces/             # 自定义消息接口包（ArmorState.msg）
 ├── docs/
 │   ├── notes.md               # 主题归纳（架构/常数/口径/踩坑速查/术语，每条结论标 log 出处）
-│   ├── log.md                 # 过程日志（23 章）：概念问答、推导、踩坑、负结果原始记录
+│   ├── log.md                 # 过程日志（24 章）：概念问答、推导、踩坑、负结果原始记录
 │   └── screenshots/           # 运行效果截图（题1 预览 + 题3 相机通路证据）
 └── results/                   # 运行输出（生成物不入库；唯一入库的证据录屏 real_camera_2026-09-09.mkv = 手机对屏回放）
 ```
@@ -643,7 +643,7 @@ ros2 launch rm_armor_visualization armor_tracker.launch.py [参数:=值 ...]
 | `video_path` | `data/demo.avi` | `source:=video` 时的视频路径 |
 | `ip_url` | 空 | `source:=ip` 时的流地址（**缺参会直接报错**） |
 | `camera_config` | `data/camera.yaml` | `source:=hik` 时的 yaml 配置 |
-| `model_path` | `models/armor_yolov8n.onnx` | bbox 检测器模型 |
+| `bbox_model_path` | `models/armor_yolov8n.onnx` | bbox 检测器模型（仅 `detector:=bbox` 时使用；名字与 `pose_model_path` 对称） |
 | `detector` | `bbox` | `bbox` / `pose` |
 | `pose_model_path` | 空 | `detector:=pose` 时**必填**（缺了节点报错退出） |
 | `repo_root` | `.` | 相对路径基准；不在仓库根目录启动时给绝对路径 |
@@ -875,7 +875,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | 像素格式转换（Bayer/Mono8/RGB8 → BGR） | —（离线白盒测试，程序为临时文件、未入库） | 照 log.md §19.10 的方法：合成四种 Bayer 相位 × 四个 OpenCV 转换码比平均误差（正确码 1.4、取错的镜像码 107.7）；结论是 `BayerRG8` 必须用 `COLOR_BayerBG2BGR` |
 | pose 模式的可视化 | `docs/screenshots/pose_rqt.png` | `ros2 launch rm_armor_visualization armor_tracker.launch.py detector:=pose pose_model_path:="$POSE_MODEL" use_rqt:=true` |
 | 快速建立整体认识 | `docs/notes.md`（**主题归纳**，9 节） | 架构 / 关键常数 / 两种检测器 / 语义与后端 / 位姿与滤波 / 评测口径 / 踩坑速查 / 负结果 / 术语表 |
-| 原理、推导与踩坑全过程 | `docs/log.md`（**过程日志**，23 章） | 按 §0 目录读；§20（四关键点与评测）、§21（负结果全录 + 交付对照）、§22（三重交叉验证）是本轮核心 |
+| 原理、推导与踩坑全过程 | `docs/log.md`（**过程日志**，24 章） | 按 §0 目录读；§20（四关键点与评测）、§21（负结果全录 + 交付对照）、§22（三重交叉验证）是本轮核心 |
 
 ## FAQ
 
@@ -889,6 +889,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | `source:=hik` 画面全空，日志刷 `不支持的像素格式 17301513` | `0x01080009 = BayerRG8`：原实现只认 `BGR8_Packed`/`Mono8` → 相机**每帧都被跳过**（节点还活着，所以 `ros2 launch` 看似正常）。已在 v3.2 支持七种格式；若仍出现，看是不是 `BayerRG10/12`（`adc_bit_depth` 未钉成 `Bits_8`） |
 | 海康画面**红蓝互换**（红装甲板看着是蓝的） | Bayer 相位取错：OpenCV 按图案"第二行第 2、3 个像素"命名，海康/GenICam 按"第一行前两个像素"命名，两边差一格 → `BayerRG8` 必须用 `COLOR_BayerBG2BGR`（写成同名的 `BayerRG2BGR` 就红蓝互换）。已修正并离线验证，见 log.md §19.10 |
 | 不想让本程序改动相机设置 | `data/camera.yaml` 的 `pixel_format` / `adc_bit_depth` / `trigger_mode` **留空 = 不调用 SDK**、用相机自己的默认值；`format` 是本工程自己的输出约定，不能留空 |
+| 改了 launch 参数名或节点参数名，行为却没变 | launch 传的名字必须与节点 `declare_parameter` 的名字**完全一致**——不一致时节点**静默用自己的默认值**（实测：把 `detector` 拼成 `detectorr`，无任何警告，照常按 `bbox` 跑）。验证办法：故意传一个不存在的模型路径跑一次，看节点是否报错（`log.md §23.2`） |
 | 编辑器里 `04_hik` 报找不到 `MvCameraControl.h`（01/02/03 却正常） | clangd **就近读第一个** `compile_commands.json` 且不合并：根目录那个是题3 的 DB（含 01/02/03，**不含** 04_hik）→ 跑 `bash scripts/setup.sh` 会自动在各工程目录建好软链；仍报错就删掉那一级的软链再重跑 |
 | 某条命令像卡住了，不结束 | 帧数参数传了非数字 → `atoi` 静默变 0 = 跑全片（只有 `armor_demo` 会报错） |
 | 改了 `03_visualization` 的源码，`ros2 run` 行为却没变 | `cmake --build` 不更新 `install/`；请用 `colcon build --packages-up-to rm_armor_visualization` |
@@ -954,6 +955,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | v3.1 | 2026-09-11 ~ 09-12 | **文档、工具与体验定型**：权重入库（`models/third_party/` + `SOURCE.md`）与许可按内容分层；三步快速开始（clone → 环境 → 验证）+ 命令行通用约定 + 文件清单 + 每题"一般用法 → 快速验证 → 产物"；`setup.sh`（只配置与构建）+ `check_env.sh` + `check_docs.sh`；ONNX Runtime 探测（含 ROS vendor 包）与 pose 可用范围写清；launch 主节点退出即整体退出；FAQ 与「预期效果」补齐；四个工程目录 `compile_commands.json` 软链（修 clangd 找不到 MVS 头文件）；文档分层（`log.md` 过程日志 + `notes.md` 归纳 + 三重交叉验证）；AI 使用声明；参考仓库表链接修正为真实仓库 |
 | v3.2 | 2026-09-12 | **功能里程碑**：真实相机接入修复 —— 海康像素格式兼容（Bayer / Mono8 / RGB8 → BGR），并修正 Bayer 相位（原来会红蓝互换）；`data/camera.yaml` 增 4 个相机侧参数（`pixel_format` / `adc_bit_depth` / `trigger_mode` / `format`） |
 | v3.3 | 2026-09-15 | **文档事实更正**：`LD_LIBRARY_PATH` 的适用口径 —— 原写"不需要"只对 `04_hik` 的程序成立；**题3 主节点在 `source:=hik` 时依赖它**（实测清空该变量后 `ldd` 报 `libMvCameraControl.so => not found`），launch 的 hik 分支已自动设置，`ros2 run` 手工启动需自行 export（`log.md §19.11`） |
+| v3.4 | 2026-09-15 | **参数改名**：`model_path` → `bbox_model_path`（与 `pose_model_path` 对称）——launch 参数、节点 `declare_parameter`、README 参数表三处同步，并按"给一个不存在的路径看节点是否报错"验证契约真的接上；FAQ 补一条"参数名不一致会静默用默认值"；`log.md` 新增 **§23**（launch 两阶段与 Substitution / 参数注入链与名字契约 / RMW 与 LD_LIBRARY_PATH / 编译链接加载与 `.so` 五级搜索顺序的概念梳理） |
 
 ---
 
@@ -965,7 +967,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 - **本人负责**：需求拆解与验收标准、技术路线与方案取舍（PnP+EKF 后端、引入深大 26 开源的 pose 模型、
   海康相机通路、以及"哪些实验值得做"的判断）、代码逐条审查与修改意见、问题定位与纠错、
   学习笔记的组织与决策记录。**手写内容仅为少量注释与配置调整。**
-- **笔记正文亦为 AI 协助成文**（`docs/log.md` 过程日志 23 章 + `docs/notes.md` 主题归纳 9 节），
+- **笔记正文亦为 AI 协助成文**（`docs/log.md` 过程日志 24 章 + `docs/notes.md` 主题归纳 9 节），
   其中的路线选择、负结果判断与取舍都是我做的决定。
 
 **用途与边界**

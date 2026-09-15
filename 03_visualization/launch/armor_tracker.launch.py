@@ -45,13 +45,14 @@ def _launch_setup(context, *args, **kwargs):
     actions = []    # 创建动作列表
 
     # ① 环境变量：RMW 用 FastDDS（本机 CycloneDDS 传大图像不稳）
-    actions.append(SetEnvironmentVariable("RMW_IMPLEMENTATION", LaunchConfiguration("rmw")))    # 设置环境变量(环境变量名, value)
+    actions.append(SetEnvironmentVariable("RMW_IMPLEMENTATION", LaunchConfiguration("rmw")))    # 设置环境变量(环境变量名, value)        
 
-    # ② hik 模式：把 MVS 库目录前置到 LD_LIBRARY_PATH（进程级，不改 .bashrc）
+    # ② source -> 节点参数 的映射（node 本身只认 video_path / camera_config）
     if source == "hik":
+        # hik 模式：把 MVS 库目录前置到 LD_LIBRARY_PATH
         actions.append(
             SetEnvironmentVariable(
-                "LD_LIBRARY_PATH",
+                "LD_LIBRARY_PATH",  # 动态链接器ld.so在运行时搜索.so的目录清单(.so文件的path)
                 # 列表。逐段拼接成一个字符串
                 [
                     LaunchConfiguration("mvs_lib_dir"),
@@ -60,30 +61,35 @@ def _launch_setup(context, *args, **kwargs):
                 ],
             )
         )
-
-    # ③ source -> 节点参数 的映射（node 本身只认 video_path / camera_config）
-    if source == "hik":
+        
+        # 拼接camera config路径
         source_param = {
             "camera_config": PathJoinSubstitution(  # 安全拼接路径（自动处理分隔符）
                 [repo_root, LaunchConfiguration("camera_config")]
             )
         }
+        # source描述
         source_desc = "hik (读 camera.yaml)"
     elif source == "ip":
+        # 获取ip url
         ip_url = LaunchConfiguration("ip_url").perform(context)
         if not ip_url:
             raise RuntimeError("source:=ip 时必须提供 ip_url，例如 ip_url:=http://10.0.0.5:8080/video")
         source_param = {"video_path": LaunchConfiguration("ip_url")}  # URL 不做路径拼接
         source_desc = f"ip ({ip_url})"
     else:
+        # 默认视频路径
         source_param = {
             "video_path": PathJoinSubstitution([repo_root, LaunchConfiguration("video_path")])
         }
         source_desc = "video (本地文件)"
 
-    params = dict(source_param)
-    params["model_path"] = PathJoinSubstitution([repo_root, LaunchConfiguration("model_path")]) # 直接交给Node，延迟到运行时求值
-    params["detector"] = LaunchConfiguration("detector")
+    params = dict(source_param) # 浅拷贝
+    # 直接交给Node，延迟到运行时求值
+    params["bbox_model_path"] = PathJoinSubstitution([repo_root, LaunchConfiguration("bbox_model_path")]) # 默认bbox模型路径
+    params["detector"] = LaunchConfiguration("detector")    # detector类型
+    
+    # pose_model_path是否被赋值
     if LaunchConfiguration("pose_model_path").perform(context):
         params["pose_model_path"] = PathJoinSubstitution(
             [repo_root, LaunchConfiguration("pose_model_path")]
@@ -118,7 +124,7 @@ def _launch_setup(context, *args, **kwargs):
         )
     )
 
-    # ④ 可选：rqt 查看标注图
+    # ③ 可选：rqt 查看标注图
     actions.append(
         Node(
             package="rqt_image_view",
@@ -128,7 +134,7 @@ def _launch_setup(context, *args, **kwargs):
             output="screen",
         )
     )
-    # ⑤ 可选：把 /armor/state 打到终端（省掉第二个终端跑 ros2 topic echo）
+    # ④ 可选：把 /armor/state 打到终端（省掉第二个终端跑 ros2 topic echo）
     actions.append(
         Node(
             package="rm_armor_visualization",
@@ -150,7 +156,7 @@ def generate_launch_description():
             DeclareLaunchArgument("video_path", default_value="data/demo.avi", description="source:=video 时的视频路径"),
             DeclareLaunchArgument("ip_url", default_value="", description="source:=ip 时的流地址(如 http://<IP>:8080/video)"),
             DeclareLaunchArgument("camera_config", default_value="data/camera.yaml", description="source:=hik 时的 yaml 配置"),
-            DeclareLaunchArgument("model_path", default_value="models/armor_yolov8n.onnx", description="bbox 检测器模型路径"),
+            DeclareLaunchArgument("bbox_model_path", default_value="models/armor_yolov8n.onnx", description="bbox 检测器模型（detector:=bbox 时使用）"),
             DeclareLaunchArgument("detector", default_value="bbox", description="检测器: bbox | pose（四关键点）"),
             DeclareLaunchArgument("pose_model_path", default_value="", description="detector:=pose 时的四关键点模型路径"),
             DeclareLaunchArgument("repo_root", default_value=".", description="仓库根目录(相对路径的基准, 可给绝对路径)"),
