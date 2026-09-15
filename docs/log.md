@@ -1547,3 +1547,22 @@ README「04_hik」与 `notes.md` §6 已按此更正口径。
 5. 为什么 launch 里设 `LD_LIBRARY_PATH` 必须"前置拼接"而不是覆盖？覆盖会先坏掉哪个库？
 6. 参数名写错会发生什么？给出一条能验证"契约接上了"的命令。
 
+### 23.7 `Node` 动作与事件处理器（补记）
+
+- **`Node(...)` 只造"启动蓝图"，不启动**：执行到该动作时才 `execute()` → 解析 parameters → 拼命令行 → `fork/exec`。存进变量的原因是后面要引用它（`OnProcessExit(target_action=…)`），也便于被条件/事件机制管理。
+- 常用字段：`package`（包名 → 去 `install/<包>/lib/<包>/` 找可执行文件）、`executable`、`name`（实为 `__node:=` 重映射）、`output="screen"`（子进程 stdout/stderr 直通 launch 终端）、`parameters`、`arguments`、`remappings`、`namespace`、`condition`。
+- **Humble 内置的事件处理器共 6 种**（实测 `launch.event_handlers`）：
+
+| 处理器 | 触发时机 |
+|---|---|
+| `OnProcessStart` | 进程**启动**时 |
+| `OnProcessExit` | 进程**退出**时（本项目用的） |
+| `OnProcessIO` | 进程有 stdout/stderr **输出**时 |
+| `OnExecutionComplete` | 所有动作执行完 |
+| `OnIncludeLaunchDescription` | 包含子 launch 时 |
+| `OnShutdown` | launch 准备关闭时 |
+
+- **三个名字别混**：`OnProcessExit` 是**处理器**、`ProcessExit` 是**事件**；`on_exit=[...]` 是该处理器的**参数**（触发后要执行的动作列表，**不是触发条件**，条件由 `target_action=` + 处理器类型决定）；`EmitEvent(Shutdown(...))` = **主动发出**"关闭"事件。
+- **本项目这一整块的作用**：主节点一退出（**正常 / 异常 / Ctrl-C 都算**）→ 先 `LogInfo` 打印排障提示 → `Shutdown` 让 launch 一起退出。不做的话 rqt 窗口会空着，看起来像"启动了但没图像"，很难意识到节点已经死了。Humble 的 `Node` **没有** `required` 参数，所以用这种方式实现。
+- 这属于 launch 的**第三种职责**：监视与联动（前两种是"构造启动环境"与"启动并传参"）。
+

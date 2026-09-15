@@ -104,21 +104,20 @@ def _launch_setup(context, *args, **kwargs):
         parameters=[params],
     )
     actions.append(tracker_node)
-    # 主节点一旦退出（例如 detector:=pose 但构建没启用 ONNX Runtime，或相机打不开），
-    # 就让整个 launch 跟着退出——否则 rqt 窗口会空着，看起来像"启动了但没图像"，
-    # 很难意识到节点其实已经死了。（Node 本身没有 required 参数，用事件处理器实现）
+
+    # 使 launch进程 跟随 主节点进程 一同退出，并打印提示
     actions.append(
         # 进程推出后，做...
-        RegisterEventHandler(
-            OnProcessExit(
-                target_action=tracker_node,
-                on_exit=[
+        RegisterEventHandler(   # 将 事件处理器 注册进context
+            OnProcessExit(  # 事件处理器：目标进程退出时触发
+                target_action=tracker_node, # 监听目标
+                on_exit=[   # 要执行的动作列表
                     LogInfo(
                         msg="[armor_tracker.launch] 主节点已退出，launch 一并退出。"
                         "常见原因：detector:=pose 但构建时未启用 ONNX Runtime；"
                         "或视频/模型/相机路径不对 —— 具体原因见上面节点打印的 ERROR。"
                     ),
-                    EmitEvent(event=Shutdown(reason="主节点已退出")),   # 发出“整体关闭”事件
+                    EmitEvent(event=Shutdown(reason="主节点已退出")),   # 发出“关闭(launch结束所有进程并退出)”事件
                 ],
             )
         )
