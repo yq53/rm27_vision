@@ -1,6 +1,6 @@
 // [工具] 把 /armor/state 打印到终端 —— 省掉"再开一个终端跑 ros2 topic echo"
 //
-// 用法：随 launch 一起起（推荐）
+// 用法：随 launch 一起（推荐）
 //     ros2 launch rm_armor_visualization armor_tracker.launch.py use_rqt:=true print_state:=true
 // 或单独起：
 //     ros2 run rm_armor_visualization armor_state_printer --ros-args -p period_ms:=500
@@ -8,9 +8,12 @@
 // 它只是 /armor/state 的一个额外订阅者：删掉它不影响主链路，主节点也完全不知道它的存在。
 
 #include <chrono>
+#include <exception>
 #include <memory>
+#include <iostream>
 
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp/utilities.hpp>
 
 #include "rm_interfaces/msg/armor_state.hpp"
 
@@ -29,7 +32,7 @@ public:
             10,
             [this](const ArmorState::SharedPtr msg) {
                 const auto now = std::chrono::steady_clock::now();
-                if (printed_ && now - last_ < period_) {
+                if (printed_ && now - last_ < period_) {    // 确保间隔
                     return;
                 }
                 last_ = now;
@@ -50,7 +53,7 @@ public:
     }
 
 private:
-    rclcpp::Subscription<ArmorState>::SharedPtr sub_;
+    rclcpp::Subscription<ArmorState>::SharedPtr sub_;   
     std::chrono::steady_clock::time_point last_ {};
     std::chrono::milliseconds period_ { 1000 };
     bool printed_ = false;
@@ -60,7 +63,14 @@ private:
 
 int main(int argc, char** argv) {
     rclcpp::init(argc, argv);
-    rclcpp::spin(std::make_shared<ArmorStatePrinter>());
+    try {
+        rclcpp::spin(std::make_shared<ArmorStatePrinter>());
+    } catch (const std::exception& e) {
+        std::cerr << "[ERROR] " << e.what() << std::endl;
+        rclcpp::shutdown();
+        return -1;
+    }
+
     rclcpp::shutdown();
     return 0;
 }

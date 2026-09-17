@@ -198,6 +198,7 @@ public:
         // 获取source的fps
         double fps = source_->fpsHint();
 
+        // 创建pub、sub、timer
         img_pub_ =
             create_publisher<sensor_msgs::msg::Image>("armor/annotated", rclcpp::SensorDataQoS());
         state_pub_ = create_publisher<ArmorState>("armor/state", 10);
