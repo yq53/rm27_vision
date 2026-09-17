@@ -27,12 +27,11 @@ namespace {
 
 constexpr double kPlateW = 0.135;
 constexpr double kPlateH = 0.125;
-constexpr double kBarLen = 0.056; // 灯条长度标称值（本素材实测最优约 52mm，见 notes）
+constexpr double kBarLen = 0.056; // 灯条长度标称值
 
-// 实测 dt 的夹取范围（见 log.md §23.8）：下界防"同一帧被算两次"，
-// 上界防"卡顿/掉线后一次外推太远"（例如相机 read 阻塞 1s 的极端情况）
-constexpr double kDtMinSec = 1e-3; // 1 ms
-constexpr double kDtMaxSec = 0.2;  // 200 ms
+// dt 的夹取范围
+constexpr double kDtMinSec = 1e-3; // 1 ms(防止间隔太短，同一帧被多算)
+constexpr double kDtMaxSec = 0.2;  // 200 ms(太长不看)
 
 // 内参K
 cv::Mat computeK(int width, int height) {
@@ -196,14 +195,8 @@ public:
             );
         }
 
-        // fpsHint() 接口只承诺"给出节拍参考"，并未承诺一定 > 0（各实现自己保证）；
-        // 这里兜底是为了防止 1/fps = inf 让定时器周期变成无穷大、节点静默不再处理帧
-        //（旧实现用 CAP_PROP_FPS，对流/相机常返回 0，历史上确实会触发）。
+        // 获取source的fps
         double fps = source_->fpsHint();
-        if (fps <= 0) {
-            fps = 30.0;
-        }
-        dt_ = 1.0 / fps;
 
         img_pub_ =
             create_publisher<sensor_msgs::msg::Image>("armor/annotated", rclcpp::SensorDataQoS());
@@ -218,7 +211,7 @@ private:
     void onTimer() {
         // 实测 dt：用两次回调的真实间隔（steady_clock 单调），并夹在 [kDtMinSec, kDtMaxSec] 内。
         const auto now_tp = std::chrono::steady_clock::now();
-        dt_ = std::clamp(
+        const double dt_ = std::clamp(
             std::chrono::duration<double>(now_tp - last_img_time_).count(), kDtMinSec, kDtMaxSec
         );
         last_img_time_ = now_tp;
@@ -338,18 +331,17 @@ private:
         img_pub_->publish(*cv_bridge::CvImage(header, "bgr8", frame).toImageMsg());
     }
 
-    std::unique_ptr<ArmorDetector> detector_;          // bbox 检测器（默认）
+    std::unique_ptr<ArmorDetector> detector_;           // bbox 检测器（默认）
     std::unique_ptr<ArmorPoseDetector> pose_detector_;  // 四关键点检测器（detector:=pose）
     std::string detector_label_;                        // 当前检测器模式名（bbox/pose，画面标注用）
     std::vector<cv::Point3d> object_points_;            // 与所选检测器匹配的 3D 物体点
-    std::unique_ptr<rm_vision::ImageSource> source_; // 图像源（video/hik 由工厂决定）
+    std::unique_ptr<rm_vision::ImageSource> source_;    // 图像源
     ArmorEKF ekf_;
-    double dt_ = 1.0 / 30.0;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr img_pub_;
     rclcpp::Publisher<ArmorState>::SharedPtr state_pub_;
     rclcpp::TimerBase::SharedPtr timer_;
     std::chrono::steady_clock::time_point last_img_time_ =
-        std::chrono::steady_clock::now() - std::chrono::seconds(1);
+        std::chrono::steady_clock::now() - std::chrono::seconds(1); // -1s为故意让第一帧数据异常，表示“没有上一帧”
 };
 
 int main(int argc, char** argv) {
