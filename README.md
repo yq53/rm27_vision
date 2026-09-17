@@ -956,6 +956,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | v3.2 | 2026-09-12 | **功能里程碑**：真实相机接入修复 —— 海康像素格式兼容（Bayer / Mono8 / RGB8 → BGR），并修正 Bayer 相位（原来会红蓝互换）；`data/camera.yaml` 增 4 个相机侧参数（`pixel_format` / `adc_bit_depth` / `trigger_mode` / `format`） |
 | v3.3 | 2026-09-15 | **文档事实更正**：`LD_LIBRARY_PATH` 的适用口径 —— 原写"不需要"只对 `04_hik` 的程序成立；**题3 主节点在 `source:=hik` 时依赖它**（实测清空该变量后 `ldd` 报 `libMvCameraControl.so => not found`），launch 的 hik 分支已自动设置，`ros2 run` 手工启动需自行 export（`log.md §19.11`） |
 | v3.4 | 2026-09-15 | **参数改名**：`model_path` → `bbox_model_path`（与 `pose_model_path` 对称）——launch 参数、节点 `declare_parameter`、README 参数表三处同步，并按"给一个不存在的路径看节点是否报错"验证契约真的接上；FAQ 补一条"参数名不一致会静默用默认值"；`log.md` 新增 **§23**（launch 两阶段与 Substitution / 参数注入链与名字契约 / RMW 与 LD_LIBRARY_PATH / 编译链接加载与 `.so` 五级搜索顺序的概念梳理） |
+| v3.5 | 2026-09-15 | **行为改进**：EKF 的时间步长由名义帧率（`1 / fpsHint()` = 33.3 ms）改为**实测 dt**（`steady_clock` 真实间隔 + `[1 ms, 200 ms]` 夹取），并把 `ekf_.predict()` 移到读帧之前（读帧失败那帧不再丢时间步长）；实测真实间隔平均 **43.7 ms** → 原实现每帧少算约 30% 的时间；旧成员 `last_img_time_` 由此真正投入使用（`log.md §23.8`） |
 
 ---
 

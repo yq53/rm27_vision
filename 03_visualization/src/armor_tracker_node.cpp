@@ -29,8 +29,12 @@ constexpr double kPlateW = 0.135;
 constexpr double kPlateH = 0.125;
 constexpr double kBarLen = 0.056; // 灯条长度标称值（本素材实测最优约 52mm，见 notes）
 
-// 内参按"当前分辨率 + 假定水平 FOV≈72°"推导：fx=(w/2)/tan(HFOV/2)，cx/cy 取中心。
-// 演示级近似；真实部署需棋盘格标定替换。
+// 实测 dt 的夹取范围（见 log.md §23.8）：下界防"同一帧被算两次"，
+// 上界防"卡顿/掉线后一次外推太远"（例如相机 read 阻塞 1s 的极端情况）
+constexpr double kDtMinSec = 1e-3; // 1 ms
+constexpr double kDtMaxSec = 0.2;  // 200 ms
+
+// 内参K
 cv::Mat computeK(int width, int height) {
     const double fx = width / (2.0 * std::tan(36.0 * CV_PI / 180.0));
     return (cv::Mat_<double>(3, 3) << fx, 0, width / 2.0, 0, fx, height / 2.0, 0, 0, 1);
@@ -183,6 +187,7 @@ public:
             cfg = rm_vision::loadSourceConfig(camera_config);
         }
         source_ = rm_vision::createImageSource(cfg); // hik 打开失败会抛异常
+
         // !source_ 是防御性检查：当前工厂契约是"返回非空指针或抛异常"，此半句正常不会成立；
         // 保留它可在将来工厂改为 return nullptr 时拦住空指针，避免下一句解引用崩溃。
         if (!source_ || !source_->isOpened()) {
@@ -211,6 +216,17 @@ public:
 private:
     // 计时器callback函数
     void onTimer() {
+        // 实测 dt：用两次回调的真实间隔（steady_clock 单调），并夹在 [kDtMinSec, kDtMaxSec] 内。
+        const auto now_tp = std::chrono::steady_clock::now();
+        dt_ = std::clamp(
+            std::chrono::duration<double>(now_tp - last_img_time_).count(), kDtMinSec, kDtMaxSec
+        );
+        last_img_time_ = now_tp;
+
+        // 预测
+        ekf_.predict(dt_);
+
+        // 读流
         cv::Mat frame;
         if (!source_->read(frame)) {
             return; // 回卷/超时已由具体源内部处理
@@ -221,6 +237,7 @@ private:
         bool has_target = false;
         std::vector<cv::Point2d> target_corners;
 
+        // 分模型检测
         if (pose_detector_) {   // pose
             const std::vector<ArmorPose> poses = pose_detector_->detect(frame);
 
@@ -250,8 +267,6 @@ private:
                 target_corners = rectToCorners(target_rect);    // 取四角点
             }
         }
-
-        ekf_.predict(dt_);
 
         // PnP求解目标板中心位姿
         cv::Mat z3x1;
