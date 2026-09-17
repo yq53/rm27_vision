@@ -66,6 +66,7 @@ bool solveArmorPosition(
     const cv::Mat& K,
     cv::Mat& z3x1
 ) {
+    // 误差分析函数(平均误差)
     auto reproj_err = [&](const cv::Mat& rvec, const cv::Mat& tvec) {
         std::vector<cv::Point2d> proj;
         cv::projectPoints(object, rvec, tvec, K, cv::noArray(), proj);
@@ -74,8 +75,9 @@ bool solveArmorPosition(
             const cv::Point2d d = proj[i] - image[i];
             sum += std::sqrt(d.x * d.x + d.y * d.y);
         }
-        return sum / image.size();
+        return sum / static_cast<double>(image.size());
     };
+
     try {
         std::vector<cv::Mat> rvecs, tvecs;
         cv::solvePnPGeneric(
@@ -91,12 +93,16 @@ bool solveArmorPosition(
         if (rvecs.empty()) {
             return false;
         }
+
+        // 确保r3.z > 0
         bool any_front = false;
         for (const auto& rv: rvecs) {
             cv::Mat rmat;
             cv::Rodrigues(rv, rmat);
             any_front = any_front || (rmat.at<double>(2, 2) > 0.0);
         }
+
+        // 比较获得最佳外参
         double best = std::numeric_limits<double>::max();
         int best_idx = -1;
         for (size_t k = 0; k < rvecs.size(); ++k) {
@@ -114,6 +120,7 @@ bool solveArmorPosition(
         if (best_idx < 0 || best > 10.0) {
             return false;
         }
+
         // 物理合理性闸门：板须在相机前方(z>0)且距离合理(<20m)，否则视为伪解丢弃
         const cv::Mat& tv = tvecs[best_idx];
         const double z = tv.at<double>(2);
@@ -123,6 +130,7 @@ bool solveArmorPosition(
         if (!(z > 0.2 && dist < 20.0)) {
             return false;
         }
+        
         z3x1 = tv.clone();
         return true;
     } catch (const cv::Exception&) {

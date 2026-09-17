@@ -197,6 +197,7 @@ int main(int argc, char** argv) {
                     target = &d;
                 }
             }
+            
             if (target != nullptr) {
                 target_rect = target->rect;
                 target_area = best_area;
@@ -217,6 +218,7 @@ int main(int argc, char** argv) {
                     target = &d;
                 }
             }
+
             if (target != nullptr) {
                 target_rect = target->rect;
                 target_area = static_cast<int>(best_area);

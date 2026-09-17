@@ -998,7 +998,8 @@ v2：框内**灯条精定位**（灯条端点 → 更准的四角点 → PnP 更
 
 ### 17.4 踩坑日志
 
-1. **图像传输 message lost / rqt 无画面**：双因——发布端 RELIABLE vs 订阅端 BEST_EFFORT 的 RMW 差异（改 `SensorDataQoS` 对齐）+ **CycloneDDS 大图像(4.6MB/帧)传输大量丢失**。解法：`export RMW_IMPLEMENTATION=rmw_fastrtps_cpp`（建议写入 ~/.bashrc）。教训：**RMW 表现异常先换 RMW 再查代码**。
+1. **图像传输 message lost / rqt 无画面**：两个因素叠加——① 发布端原本用 RELIABLE + 深队列，而订阅端（rqt_image_view）用 BEST_EFFORT；大图像在 RELIABLE 下要走重传/心跳，实时流反而容易积压；② **CycloneDDS 传 4.6 MB/帧大图像大量丢失**。解法：发布端改用 `rclcpp::SensorDataQoS()`（BEST_EFFORT + KEEP_LAST(5)，即"允许丢帧、只要最新"）+ `export RMW_IMPLEMENTATION=rmw_fastrtps_cpp`（建议写入 `~/.bashrc`）。教训：**RMW/QoS 异常先换传输层与 QoS 再查代码**。
+   （**2026-09-15 更正措辞**：原文写成"发布端 RELIABLE vs 订阅端 BEST_EFFORT 的 RMW 差异"，说法不严谨——按 DDS 兼容规则，“提供 RELIABLE + 请求 BEST_EFFORT” 是**兼容**的（只有"请求强于提供"才不兼容、会静默收不到）；真正拖慢大图的是 RELIABLE 的重传代价与 CycloneDDS 的大包表现。详见 §23.3。）
 2. **rqt 带话题参数启动**才稳定（手动下拉经常没真正订阅，显示占位渐变图）。
 3. **自定义消息不能"同包给可执行程序直用"**（Humble 需 typesupport 目标仪式感，易错）→ 正确姿势=**独立接口包**；成员 group 必须顶层。
 4. `ros2 topic echo --field width` 之类有时阻塞：大消息 + best_effort 偶发丢，用 `hz`/多试可证。
