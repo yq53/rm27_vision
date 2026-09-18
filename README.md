@@ -836,11 +836,11 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 
 - **`04_hik` 的三个程序不需要**手工设 `LD_LIBRARY_PATH`：CMake 已把 `/opt/MVS/lib/64` 写进它们的 RUNPATH
   （可 `readelf -d build/04_hik/hik_grab | grep -i path` 查看）。
-- **但题3 的主节点不一样**：`install/…/armor_tracker_node` 的 RUNPATH 只含 ONNXRuntime、**不含 MVS**，
-  所以 `source:=hik` 时 `libMvCameraControl.so` 依赖 `LD_LIBRARY_PATH`——**launch 的 hik 分支已自动设好**
-  （`armor_tracker.launch.py`），经 launch 启动无需手工设置；用 `ros2 run` 手工启动则要自己
-  `export LD_LIBRARY_PATH=/opt/MVS/lib/64:$LD_LIBRARY_PATH`。
-  （实测：清空该变量后 `ldd` 报 `libMvCameraControl.so => not found`，而 `libonnxruntime.so.1` 仍能从 RUNPATH 解析 → `log.md §19.11`）
+- **题3 的主节点**：`install/…/armor_tracker_node` 的 RUNPATH 现在**也含 `/opt/MVS/lib/64`**
+  （v3.6 起补的显式 `-Wl,-rpath`，写法与 `01_detector` 给 ONNXRuntime 补 rpath 同款）→ `source:=hik` 时
+  **不需要**手工设 `LD_LIBRARY_PATH`；launch 的 hik 分支仍会自动设一层，作为冗余兜底。
+  （历史：v3.3 时实测清空该变量后 `ldd` 报 `libMvCameraControl.so => not found`——因为 CMake 自动汇总的 RUNPATH
+  在 `install` 时会被剥掉、只有显式 `-Wl,-rpath` 保留；`log.md §19.11`、§23.11、§23.12）
 - 取帧数传非数字会抛未捕获异常、进程 abort（退出 134）——传数字即可。
 - 主节点用的是封装后的版本（`image_source.cpp` 的 `#ifdef RM_USE_HIK_SDK` 段 + `data/camera.yaml`）：
   **现场展示只需改 `data/camera.yaml` 里的 `serial_number`，代码不用动**；像素格式适配（Bayer/Mono8/RGB8 → BGR）
@@ -957,6 +957,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | v3.3 | 2026-09-15 | **文档事实更正**：`LD_LIBRARY_PATH` 的适用口径 —— 原写"不需要"只对 `04_hik` 的程序成立；**题3 主节点在 `source:=hik` 时依赖它**（实测清空该变量后 `ldd` 报 `libMvCameraControl.so => not found`），launch 的 hik 分支已自动设置，`ros2 run` 手工启动需自行 export（`log.md §19.11`） |
 | v3.4 | 2026-09-15 | **参数改名**：`model_path` → `bbox_model_path`（与 `pose_model_path` 对称）——launch 参数、节点 `declare_parameter`、README 参数表三处同步，并按"给一个不存在的路径看节点是否报错"验证契约真的接上；FAQ 补一条"参数名不一致会静默用默认值"；`log.md` 新增 **§23**（launch 两阶段与 Substitution / 参数注入链与名字契约 / RMW 与 LD_LIBRARY_PATH / 编译链接加载与 `.so` 五级搜索顺序的概念梳理） |
 | v3.5 | 2026-09-15 | **行为改进**：EKF 的时间步长由名义帧率（`1 / fpsHint()` = 33.3 ms）改为**实测 dt**（`steady_clock` 真实间隔 + `[1 ms, 200 ms]` 夹取），并把 `ekf_.predict()` 移到读帧之前（读帧失败那帧不再丢时间步长）；实测真实间隔平均 **43.7 ms** → 原实现每帧少算约 30% 的时间；旧成员 `last_img_time_` 由此真正投入使用（`log.md §23.8`） |
+| v3.6 | 2026-09-17 | **行为改进 + 概念梳理**：题3 主节点补显式 `-Wl,-rpath,${MVS_SDK_DIR}/lib/64` —— `source:=hik` 时**不再依赖** `LD_LIBRARY_PATH`（实测 `install` 只剥掉 CMake 自动汇总的 RUNPATH 条目、显式 `-Wl,-rpath` 均保留），launch 那层保留为冗余兜底（`log.md §23.12`）；`log.md` §23 扩充 **§23.9–§23.11**：`add_subdirectory` 与"配置期当场执行"、ALL 集合与依赖图（澄清 `EXCLUDE_FROM_ALL` 只管"要不要"、链接才管"谁拉起谁"）、`ament_target_dependencies` 的查找顺序与"能接哪些包"的判断（更正 OpenCV 那处口径）、`install()` 与 `ament_package()` 的六项产出 |
 
 ---
 

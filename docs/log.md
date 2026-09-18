@@ -1237,6 +1237,9 @@ v2：框内**灯条精定位**（灯条端点 → 更准的四角点 → PnP 更
 （§19.9 "环境变量自动化"就是为它准备的），所以**经 launch 启动无需手工设置**；用 `ros2 run` 手工启动则要自己 export。
 README「04_hik」与 `notes.md` §6 已按此更正口径。
 
+> **2026-09-17 更新**：已给主节点补上显式 rpath `/opt/MVS/lib/64`（§23.12）→ 上表"不含 MVS"不再成立，
+> 该依赖**不再必需**（`ros2 run` 手工启动也能找到 `libMvCameraControl.so`）；launch 的 hik 分支仍保留设置，作为冗余兜底。
+
 ## 20. 四关键点模型接入与评测体系（2026-09-10）
 
 ### 20.1 为什么做这条线
@@ -1530,6 +1533,8 @@ README「04_hik」与 `notes.md` §6 已按此更正口径。
 
 - 结论：**"要不要环境变量"取决于库放在哪、有没有别的机制能找到它**，与静态/动态无关。launch 那行必须"前置拼接"——若覆盖，连 `rclcpp` 都加载不了（详见 §19.11）。
 - **CMake 的 RPATH 策略**（实测差异）：build 树二进制的 RUNPATH 含 `/opt/MVS/lib/64`、`/opt/ros/humble/lib`、`/usr/local/lib`；**install 时会被替换成 `INSTALL_RPATH`（默认空）**，只有原始 `-Wl,-rpath` 留下的那条保留 → 这就是"build 目录里能跑、装完找不到库"的原因。
+  （2026-09-17 复核：结论成立，措辞可更准——被去掉的是 **CMake 自动汇总**的那些条目，**显式 `-Wl,-rpath`** 的条目原样保留；
+  重新实测的完整 RUNPATH 见 §23.11，据此给题3 主节点补 MVS rpath 的落地见 §23.12。）
 - **`.so` 三段式命名**：`libopencv_core.so`（链接名）→ `.so.413`（SONAME，写进 NEEDED）→ `.so.4.13.0`（真实文件）；主版本进位 = ABI 不兼容，也是 `libcv_bridge`(4.5) 与本节点(4.13) 冲突警告的来源。
 
 ### 23.5 本轮落地变更：`model_path` → `bbox_model_path`
@@ -1577,4 +1582,192 @@ README「04_hik」与 `notes.md` §6 已按此更正口径。
 - **实测（视频，231 帧）**：真实间隔 **min 38.6 ms / 平均 43.7 ms / max 200 ms（触到夹取上限）**，而名义值是 **33.3 ms** → **原实现每帧少算约 30% 的时间**；夹取上限确实被触发过一次（不夹取的话，会有一个 ≥200 ms 的步长直接进 `F(dt)`/`Q(dt)`）。
 - **诚实说明（一次不成立的对照）**：另做了一轮"名义 dt vs 实测 dt"的速度对照（读 `armor_state_printer` 的 `v=`），得到 0.474 vs 0.620 m/s——但 `armor_state_printer` 是 **1 Hz 打点**，两种实现的处理速度不同 → 采样到的**视频帧不同**，两组数不可比。**该对照不能作为结论**；要量化 dt 对速度估计的影响，需按"视频帧号"对齐记录（列为待办）。
 - **收益与代价**：收益在真机（帧率浮动、卡顿、掉帧）与后续预测；代价是 dt 随调度抖动，所以**必须 clamp**。视频回放上肉眼看不出差别。
+
+### 23.9 构建系统三件事：`add_subdirectory` / ALL 集合 / 依赖图（2026-09-17）
+
+> 起因：读 `02_tracker/CMakeLists.txt` 时对第 12 行那句注释产生疑问——"EXCLUDE_FROM_ALL：只编库，不默认编它的 armor_demo"，
+> 感觉"摘出 ALL"与"只编库"两件事对不上。复查后确认：**疑问是对的，那句话把两个机制压成了一句**。
+
+**（1）`add_subdirectory` 在干什么**
+
+`cmake -S . -B build` 那一刻，CMake 是一个**逐行执行的脚本解释器**：跑到 `add_subdirectory(...)` 就跳进那个目录的
+`CMakeLists.txt` 继续跑，跑完回来接着跑下一行。
+
+- "当场执行"执行的是 **CMake 脚本**，不是编译源码；编译器要到 `cmake --build` 才动。
+- 子目录里的 `add_library` / `add_executable` **并入同一个构建系统**（不是嵌套子项目）→ 所以
+  `cmake --build build --target armor_detector` 能直接点到它。
+- **变量继承、不回传**：子目录能读父目录的变量（02 里能直接写 `${OpenCV_LIBS}`，来自父级 `find_package`），
+  子目录里的 `set()` 出了本目录就没了。
+- **两个路径基准不同**（最易错）：
+
+| 参数 | 相对谁 | 本项目写法 |
+|---|---|---|
+| `source_dir` | **写这行命令的 CMakeLists 所在目录** | `../01_detector` |
+| `binary_dir` | **build 树根** | `01_detector` |
+
+实测这条链走了两层：`03_visualization` → `add_subdirectory(../02_tracker 02_tracker …)`，
+`02_tracker` → `add_subdirectory(../01_detector 01_detector …)` ⇒ `build/rm_armor_visualization/02_tracker/01_detector/`。
+
+**（2）"依赖图"是什么**
+
+CMake 在**配置期**维护的有向图：
+
+| 项 | 内容 |
+|---|---|
+| 节点 | target（静态库 / 可执行文件 / IMPORTED 外部库 …） |
+| 边① | `target_link_libraries(A B)`：A 依赖 B，并把 usage requirements（include 目录、`-Wl,-rpath`）**沿边传播** |
+| 边② | `add_dependencies(A B)`：只排顺序，不链接 |
+| 边③ | 生成器补的文件级边（`.cpp → .o → .a`）——这一层是 Make/Ninja 的图，不是 CMake target 级的图 |
+
+这张图决定三件事：**编译顺序与并行度**、`--target X` 会牵出什么、**默认 `ALL` 包含谁**。
+
+**（3）`EXCLUDE_FROM_ALL` 的真实作用（本轮关键澄清）**
+
+它做的事**只有一件**：把该子目录的**所有**目标从父级 `ALL` 集合里摘出去——**连 `armor_detector` 自己也摘**。
+
+所以 02 那句注释其实是两件事压成了一句：
+
+| 效果 | 靠什么实现 |
+|---|---|
+| **只编库**（库被编出来） | `target_link_libraries(... armor_detector)` —— **链接**，与 `EXCLUDE_FROM_ALL` 无关 |
+| **不编 `armor_demo`** | `EXCLUDE_FROM_ALL` |
+
+**依赖边是单向的，构建只沿边往上游走（后向闭包）。** `armor_demo → armor_detector` 只意味着"编 demo 得先编库"，
+反方向不成立 → 链库不会牵出 demo；只有显式 `--target armor_demo` 才会编它（那是明确点名要它）。
+
+实测证据（`build/`）：
+
+```
+03 树 ALL（build/rm_armor_visualization/CMakeFiles/Makefile2）：
+  all: CMakeFiles/armor_video_node.dir/all
+  all: CMakeFiles/armor_tracker_node.dir/all
+  all: CMakeFiles/armor_state_printer.dir/all
+
+make help：armor_demo / eval_demo / 7 个教学 demo 全都在（只是不在 ALL 里）
+
+armor_demo 可执行文件：只有 build/01_detector/armor_demo 一份
+libarmor_detector.a   ：三份（01 自己的树、02 树的 01_detector、03 树的 02_tracker/01_detector）
+```
+
+**不写 `EXCLUDE_FROM_ALL` 会怎样**：03 的 `ALL` 变成 3 + 01 的全部（`armor_detector` / `armor_pose_detector` /
+`armor_demo`），`colcon build` 会顺带把教学 demo 全编一遍——慢，且任一 demo 的依赖缺失就整个构建失败。
+
+**（4）别混两件事**：`${}` 是**配置期当场展开**（脚本执行流），而"先链后定义"合法是因为**目标是生成期才解析**（图）。
+一个在脚本流里、一个在图里。
+
+### 23.10 `ament_target_dependencies` 到底吃什么（含一处口径更正）
+
+它**只吃 `find_package` 找到的包**，且可用性取决于**那个包留下了什么变量**。源码里的查找顺序
+（`/opt/ros/humble/share/ament_cmake_target_dependencies/cmake/ament_target_dependencies.cmake`）：
+
+1. 先查 `<pkg>_FOUND`，不成立直接 `FATAL_ERROR`（所以必须先 `find_package`）；
+2. **优先现代路径**：`<pkg>_TARGETS` 里每个名字都是真实存在的 target → 只用这些 imported target 链接；
+3. 否则看 `<pkg>_INTERFACES`（已废弃，会打 DEPRECATION 警告）；
+4. 都没有 → 退回**老式变量**：`<pkg>_DEFINITIONS` → 宏、`<pkg>_INCLUDE_DIRS` → include、
+   `<pkg>_LIBRARIES`（配合 `<pkg>_LIBRARY_DIRS` 做 `find_library`）→ 链接、`<pkg>_LINK_FLAGS` → 链接选项。
+
+实测四个包：
+
+| 包 | 实测导出 | 走哪条分支 |
+|---|---|---|
+| `rclcpp` | `rclcpp_TARGETS` + 老式三件套 | 现代 |
+| `rm_interfaces` | `rm_interfaces_TARGETS` + 老式三件套 | 现代 |
+| `OpenCV` | 无 `OpenCV_TARGETS`，但**有** `OpenCV_INCLUDE_DIRS` + `OpenCV_LIBRARIES`（另有 `OpenCV_LIBS`） | **老式（能用）** |
+| `yaml-cpp` | 只有 `YAML_CPP_LIBRARIES` | ❌ 名字对不上 `yaml-cpp_*` |
+
+证据侧：`armor_state_printer` 只写了 `ament_target_dependencies(...)`、**没有任何 `target_link_libraries`**，
+而它的链接行里出现了 `/opt/ros/humble/lib/librclcpp.so` + 6 个 `librm_interfaces__*.so`，编译行里出现 28 个
+`-isystem`（含 `install/rm_interfaces/include/rm_interfaces`）→ `ament_target_dependencies` 确实是"一次灌三样"。
+
+**口径更正**：本轮早前讨论里说过"OpenCV 不走 ament 约定"，**说绝对了**——OpenCV 确实提供了
+`OpenCV_INCLUDE_DIRS` + `OpenCV_LIBRARIES` 这一对，`ament_target_dependencies(x OpenCV)` 是能工作的。
+`03_visualization/CMakeLists.txt` 39/47 行真正**必须**写 `target_link_libraries` 的理由只有一个：
+**`armor_detector` 是本工程的 target，`ament_target_dependencies` 接不了**；既然如此，`${OpenCV_LIBS}`
+顺手写在同一行，也与 01/02 保持一致。
+
+**判断三步**（按可靠性递增）：
+
+```bash
+# 1. 有 ament_cmake_export_* 就是 ament 包（那两个文件正是生成上述变量的机器）
+ls /opt/ros/humble/share/rclcpp/cmake/
+# 2. 直接找变量
+grep -rhoE "rclcpp_(TARGETS|INCLUDE_DIRS)" /opt/ros/humble/share/rclcpp/cmake/ | sort -u
+# 3. 最硬：CMakeLists 里临时 message(STATUS "${pkg}_TARGETS=${${pkg}_TARGETS}") 跑一次 configure
+```
+
+顺带：Humble 起官方建议用 `target_link_libraries(x ${rclcpp_TARGETS})` 取代它（它已被标记为不推荐），本项目暂不改。
+
+### 23.11 `install()` 与 `ament_package()`：把构建产物变成 ROS 包
+
+**`install()` 三行的落点**（`03_visualization/CMakeLists.txt` 61-65 行，实测）：
+
+| 命令 | 落点 |
+|---|---|
+| `install(TARGETS … DESTINATION lib/${PROJECT_NAME})` | `install/rm_armor_visualization/lib/rm_armor_visualization/{armor_video_node, armor_tracker_node, armor_state_printer}` |
+| `install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})` | `install/…/share/rm_armor_visualization/launch/armor_tracker.launch.py` |
+| `ament_package()` | 见下表 |
+
+`install/` 就是 **ROS 的运行场地**，不是备份目录——`ros2 launch` 靠 ament 索引定位包、再找 `share/<pkg>/launch/`。
+
+**`ament_package()` 干了六件事**（源码自述：*install the package.xml file, and generate code for `find_package`
+so that other packages can get information about this package*）：
+
+| 干什么 | 实测产物 |
+|---|---|
+| 装 `package.xml` | `share/rm_armor_visualization/package.xml` |
+| 生成 CMake config（`configure_file` + `install(FILES …)`） | `share/…/cmake/rm_armor_visualizationConfig.cmake`、`…Config-version.cmake` |
+| 注册 ament 索引（**空文件，靠文件名登记**） | `share/ament_index/resource_index/packages/rm_armor_visualization` |
+| 告诉 colcon 这是什么包 | `share/colcon-core/packages/rm_armor_visualization` |
+| 生成环境脚本 | `local_setup.{sh,bash,zsh}`、`package.{sh,bash,zsh,ps1}`、`package.dsv`、`hook/cmake_prefix_path.*`、`environment/{ament_prefix_path,path}.*` |
+| 解析 `package.xml` + 注册卸载目标 | `make help` 里的 `rm_armor_visualization_uninstall` |
+
+**必须在最后、且只调一次**：macro 开头会校验 `project()` 已调用，并置一个"ament_package() was called"标记
+**专门检测调用顺序错误**——它要收集**此刻已登记的** install 规则与 target（`ament_export_*` 那套）再写成 config；
+提前调用就会生成一个空 config。
+
+**不写的后果**：`install/` 里没有 ament 索引记录 → colcon 不认为这是 ROS 包 → `ros2 launch rm_armor_visualization …`
+找不到包。**也正因如此 01/02 没有它**：纯 CMake 静态库 + demo，不需被 ROS 索引。
+
+**`install()` 是复制步骤，不是重编步骤**（经典坑）：
+
+- `colcon build` = 编 + 装；而 `cmake --build build --target armor_tracker_node` **只编不装** →
+  `install/` 里还是旧的 → "改了代码但 `ros2 launch` 跑的还是旧行为"。
+- 实测痕迹：`install/` 里 `armor_video_node` 是 `9月11 22:51`、另两个是 `9月17 13:59`
+  （目标未变则 `file(INSTALL)` 不重复制）。
+
+**install 会剥掉 RPATH**（与 §23.4 那条呼应）：同一个二进制
+
+```
+build 树  RUNPATH: /opt/MVS/lib/64 : …/onnxruntime/lib : /opt/MVS/lib/64 : …/onnxruntime/lib : /opt/ros/humble/lib : …/install/rm_interfaces/lib : /usr/local/lib :
+install 后 RUNPATH: /opt/MVS/lib/64 : /home/yq/my_project/ws_exam/.models_ext/onnxruntime/lib
+```
+
+被剥掉的正是 CMake **自动汇总**的那些（ROS / `rm_interfaces` / `/usr/local/lib`）；
+**显式 `-Wl,-rpath` 留下的都保留**。这条就是下面 §23.12 的依据。
+
+### 23.12 落地：题3 主节点补 MVS 显式 rpath（2026-09-17）
+
+- **动机**：§19.11 记的"题3 主节点在 `source:=hik` 时依赖 `LD_LIBRARY_PATH`"能跑但**脆**——不经 launch
+  （`ros2 run`、手工执行）就 `not found`。根因是 MVS 那三行（`03_visualization/CMakeLists.txt` 48-53）
+  里 `target_link_directories` **只管链接期**、`PRIVATE` 也不外传，所以 install 后的二进制里没有 MVS 路径。
+- **改动**（1 行，`03_visualization/CMakeLists.txt`）：
+
+```cmake
+  # 让可执行文件在运行时也能找到 libMvCameraControl.so（不依赖 launch 设的 LD_LIBRARY_PATH）
+  target_link_options(armor_tracker_node PRIVATE "-Wl,-rpath,${MVS_SDK_DIR}/lib/64")
+```
+
+  写法与 `01_detector/CMakeLists.txt` 第 41 行给 ONNX Runtime 补 rpath 同款（ORT 那条当初就是这么写的，
+  也正是它在前面的 RPATH 剥离里活了下来，MVS 没有——这个对比就是这次的依据）。
+- **实测验收**（configure + build + install 均退出码 0）：
+
+```
+重新链接后 RUNPATH: /opt/MVS/lib/64 : …/onnxruntime/lib : /opt/MVS/lib/64 : …（自动汇总的那些仍在）
+install 后 RUNPATH: /opt/MVS/lib/64 : /home/yq/my_project/ws_exam/.models_ext/onnxruntime/lib
+```
+
+  → install 剥掉自动汇总、**两条显式 rpath 都保留**；MVS 的库定位从"只靠环境变量"变成
+  **"环境变量 + RUNPATH" 双保险**。
+- **launch 里那行 `LD_LIBRARY_PATH` 保留不动**：这次只做"加一条 rpath"，不拆已有的兜底机制；
+  两处指向同一个 `/opt/MVS/lib/64`，冗余无害。
 

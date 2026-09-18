@@ -65,4 +65,5 @@ install(TARGETS armor_video_node armor_tracker_node armor_state_printer DESTINAT
 # 安装 launch 文件（ros2 launch rm_armor_visualization armor_tracker.launch.py）
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
 
+# 装package.xml + 生成CMake config + 注册ament索引 + 生成环境脚本 + 解析package.vml + 注册卸载目标
 ament_package()

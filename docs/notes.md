@@ -123,7 +123,7 @@
 | `[ros2run]: Aborted` / spdlog `Read-only file system` | `~/.ros` 不可写 → `export ROS_LOG_DIR=$PWD/.roslog` | `log.md §17.4` |
 | 手机流 "Stream ends prematurely" | URL 少了 `/video` 后缀 | `log.md §17.4` |
 | 检测框在但 z<0 / 距离乱跳 | 手机竖屏产生 90° 旋转元数据 → 镜像假解，务必横屏 | `log.md §17.4` |
-| 报找不到 `libMvCameraControl.so` | **先分清是哪个程序**：`04_hik` 的三个程序**不需要**设（CMake 已写入 RUNPATH）；**题3 主节点需要**（它的 RUNPATH 只含 ONNXRuntime）——launch 的 hik 分支已自动设好，`ros2 run` 手工启动才要自己 export | `log.md §19.11` |
+| 报找不到 `libMvCameraControl.so` | **先分清是哪个程序**：`04_hik` 的三个程序与**题3 主节点**都已把 `/opt/MVS/lib/64` 写进 RUNPATH（后者 v3.6 起）→ 都**不需要**手工设；launch 的 hik 分支仍会自动设一层作冗余兜底 | `log.md §19.11`、§23.12 |
 | 设了 `RM_CORNER_DEBUG=0` 也落盘调试图 | 源码判断是 `getenv() != nullptr`，**传任意值都触发** | 本轮实测（README） |
 | `scripts/setup.sh` 探不到 ONNX Runtime | 用 `ORT_DIR=/你的/onnxruntime bash scripts/setup.sh` 指定 | `README.md`「第二步：环境配置」 |
 | 想让"主节点退出 ⇒ launch 一起退出" | Humble 的 `Node` **不支持** `required=True`（会报 `unexpected keyword argument 'required'`）；要用 `RegisterEventHandler(OnProcessExit(target_action=节点, on_exit=[EmitEvent(event=Shutdown())]))` | 本轮实测（`armor_tracker.launch.py`） |
@@ -136,8 +136,9 @@
 | 不想让本程序改动相机设置 | `data/camera.yaml` 的 `pixel_format` / `adc_bit_depth` / `trigger_mode` **留空 = 不调用 SDK**、用相机自己的默认值；`format` 是本工程自己的输出约定，不能留空 | `log.md §19.10` |
 | 相机设置"成功了"却没生效 | 三个相机侧设置都只是**请求**，相机可拒绝（返回码只警告、不中断）；`ADCBitDepth` 是 `PixelFormat` 的父设置，部分节点还只在停止取流时可写 → 权威判据是首帧那行 `相机实际输出格式：…` | `log.md §19.10` |
 | 改了参数名后行为"没变" | launch 传的参数名必须与节点 `declare_parameter` 的**完全一致**——不一致时节点**静默退回自己的默认值**（实测：`detector` 拼成 `detectorr` 无任何警告）。改成"给一个不存在的路径看节点是否报错"最能把契约验证出来 | `log.md §23.2` |
-| 报 `libMvCameraControl.so => not found` | 先分清是哪个程序：`04_hik` 有 RUNPATH 不需要设；**题3 主节点需要**（launch hik 分支已自动设好，`ros2 run` 手工启动要自己 export） | `log.md §19.11` |
+| 报 `libMvCameraControl.so => not found` | 先分清是哪个程序：`04_hik` 与题3 主节点都有 RUNPATH（v3.6 起），**都不需要**设；launch hik 分支仍会自动设一层作兜底 | `log.md §19.11`、§23.12 |
 | 想搞清 launch/参数/`.so` 加载机制 | 见 `log.md §23`：两阶段与 Substitution、`OpaqueFunction`、参数注入链与名字契约、RMW/DDS、`LD_LIBRARY_PATH`、`.o/.a/.so` 与 `ld.so` 五级搜索顺序 | `log.md §23` |
+| 想搞清 CMake 构建系统本身 | 见 `log.md §23.9`–§23.12：`add_subdirectory` 的"配置期当场执行"、`EXCLUDE_FROM_ALL` 与 ALL 集合、依赖图与后向闭包、`ament_target_dependencies` 的查找顺序与"能接哪些包"、`install()` 与 `ament_package()` 的产出、install 时 RPATH 被剥 | `log.md §23.9` |
 
 ## 7. 负结果与已知局限
 
