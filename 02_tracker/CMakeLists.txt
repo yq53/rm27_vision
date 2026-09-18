@@ -9,8 +9,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(OpenCV REQUIRED)
 
-# 引入题1 的检测器库（EXCLUDE_FROM_ALL：只编库，不默认编它的 armor_demo）
-add_subdirectory(../01_detector 01_detector EXCLUDE_FROM_ALL)
+# 引入题1 编译01_detector/CMakeLists（EXCLUDE_FROM_ALL：只编库，不默认编它的 armor_demo）
+# (源码目录(相对于CMakeLists) 构件产物放在哪个子目录(相对于build) )
+add_subdirectory(../01_detector 01_detector EXCLUDE_FROM_ALL)  
 
 # L2 学习工具：正投影（3D -> 2D）演示，把 L1 的相机模型"看"见
 add_executable(projection_demo src/projection_demo.cpp)
