@@ -6,16 +6,21 @@
   <maintainer email="yq@example.com">yq</maintainer>
   <license>MIT</license>
 
+  <!-- 构建工具 -->
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>rosidl_default_generators</buildtool_depend>
 
+  <!-- ros依赖 -->
   <depend>std_msgs</depend>
   <depend>geometry_msgs</depend>
 
+  <!-- 运行期依赖 -->
   <exec_depend>rosidl_default_runtime</exec_depend>
 
+  <!-- 声明属于哪个组(生成接口必须) -->
   <member_of_group>rosidl_interface_packages</member_of_group>
 
+  <!-- 告诉colcon用哪套构建 -->
   <export>
     <build_type>ament_cmake</build_type>
   </export>

@@ -1771,3 +1771,66 @@ install 后 RUNPATH: /opt/MVS/lib/64 : /home/yq/my_project/ws_exam/.models_ext/o
 - **launch 里那行 `LD_LIBRARY_PATH` 保留不动**：这次只做"加一条 rpath"，不拆已有的兜底机制；
   两处指向同一个 `/opt/MVS/lib/64`，冗余无害。
 
+### 23.13 落地：构建优化级别与 `scripts/` 口径修正（2026-09-18）
+
+> 起因：通读 `scripts/` 三个脚本时发现四处问题，全部修掉并实测验收。
+
+**① 题3 主节点此前是 `-O0` 编译的（最重要的一条）**
+
+| 工程 | `CMAKE_BUILD_TYPE` | 实测编译标志 |
+|---|---|---|
+| `build/01_detector` | `Release` | `-O3 -DNDEBUG` |
+| `build/02_tracker` | `Release` | `-O3 -DNDEBUG` |
+| `build/rm_armor_visualization` | **（空）** | **无任何 `-O`，即 `-O0`**，且无 `-DNDEBUG` |
+
+根因：`setup.sh` 给题1/题2 的 `cmake` 显式传了 `-DCMAKE_BUILD_TYPE=Release`，而给 colcon 的那条没传——
+**colcon 自己不设构建类型**，CMake 单配置生成器在未指定时就不带任何优化选项。后果是
+**题3 的节点（考核交付物本身）每帧的检测 + PnP + EKF 全在无优化下跑**，而离线评测工具 `eval_demo` 反而是 `-O3`。
+
+修法（`setup.sh`）：把构建类型并进 `CMAKE_ARGS` 初值，并顺手删掉原来的
+`if [[ ${#CMAKE_ARGS[@]} -gt 0 ]]` 分支——那个 if/else 是为了防"空数组展开成裸 `--cmake-args`"（会报错），
+现在数组恒非空，分支成了死代码。
+
+```bash
+CMAKE_ARGS=(-DCMAKE_BUILD_TYPE=Release)
+...
+colcon build --packages-up-to rm_armor_visualization --cmake-args "${CMAKE_ARGS[@]}"
+```
+
+**② `MVS_SDK_DIR` 口径统一**
+
+`check_env.sh` 读 `${MVS_SDK_DIR:-/opt/MVS}`，而 `setup.sh` 硬编码 `/opt/MVS` 且不传 `-DMVS_SDK_DIR`，
+`04_hik` 也只吃默认值 → 装在别处的人"自检能找到、构建却走默认路径"。现在 `setup.sh` 同样读 `MVS_SDK_DIR`，
+并把它传给 colcon（`-DMVS_SDK_DIR=`）与 `04_hik` 的 cmake；使用说明也补进了脚本头部与 README。
+
+**③ 删掉一行空操作**
+
+`setup.sh` 结尾原本有 `source install/setup.bash`。用 `bash scripts/setup.sh` 执行时它是**子进程**，
+source 的结果不会传回调用者的终端 → 该行对用户毫无作用（真正生效的是 README 让用户自己再 source 一次）。删除。
+
+**④ 两套查找机制可见化（不是 bug，是期望管理）**
+
+`check_env.sh` 查 OpenCV 用的是 **pkg-config**，而构建用的是 **CMake 的 `find_package(OpenCV)`**——两套机制互相独立：
+本机同时存在 `/usr/local/lib/pkgconfig/opencv4.pc`（4.13.0，自编译）与
+`/usr/lib/x86_64-linux-gnu/pkgconfig/opencv4.pc`（apt 的 4.5），pkg-config 选哪个取决于 `PKG_CONFIG_PATH` 顺序。
+本机**恰好一致**（`OpenCV_DIR=/usr/local/lib/cmake/opencv4`，`pkg-config --modversion opencv4` = 4.13.0），
+但理论上可以不一致。现在自检会打印 `.pc` 的来处，并在检测到两份 `.pc` 并存时提示"以 CMake 的为准"。
+
+**验收（实测）**
+
+```
+bash scripts/setup.sh        → 退出码 0；USE_ONNXRUNTIME=ON、USE_HIK_SDK=ON；四个工程全部构建成功
+bash scripts/check_env.sh    → 退出码 0；OpenCV 那行打印 "4.13.0（取自 /usr/local/lib/pkgconfig）"
+
+build/rm_armor_visualization/CMakeCache.txt   CMAKE_BUILD_TYPE:STRING=Release
+题3 主节点编译标志                              ['-O3', '-DNDEBUG']   ← 改前为空
+armor_detector.cpp                            ['-O3']
+
+ros2 launch rm_armor_visualization armor_tracker.launch.py print_state:=true
+  → 节点正常检测并发布，armor_state_printer 持续打印 d=… pos=… v=…
+```
+
+**未改（有意留着）**：`setup.sh` 与 `check_env.sh` 里那段 ORT 候选路径列表是**逐字重复**的（8 个候选）。
+抽成公共文件（`source scripts/lib.sh`）能消掉重复，但会引入第三个文件，并把 `set -e` / `REPO` 变量的作用域耦进来，
+收益不抵复杂度——保持重复。
+

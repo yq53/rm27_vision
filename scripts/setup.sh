@@ -5,6 +5,7 @@
 #   bash scripts/setup.sh            # 配置环境 + 构建（自动探测可选的 ONNX Runtime / MVS SDK）
 #   bash scripts/setup.sh --clean    # 先删掉 build/ install/ log/ 再重新构建
 #   ORT_DIR=/path/to/onnxruntime bash scripts/setup.sh    # 手工指定 ORT 位置
+#   MVS_SDK_DIR=/path/to/MVS bash scripts/setup.sh        # 手工指定 MVS SDK 位置（默认 /opt/MVS）
 #
 # 它做三件事：
 #   1) source ROS2 环境，并设好本工程需要的环境变量（RMW / ROS_LOG_DIR）；
@@ -50,7 +51,8 @@ fi
 # CMAKE_ARGS：给 colcon（题3 的 ROS 包）；PLAIN_ARGS：给题1/题2 的普通 CMake 工程。
 # 两边都要带 ORT 开关：题2 的 eval_demo（离线评测基础设施）用 pose 跑 A/B，靠的就是这个开关；
 # 只给 colcon 的话，clone 者编出来的 eval_demo 会在 detector=pose 时直接抛异常。
-CMAKE_ARGS=()
+# 构建类型必须显式给 colcon —— colcon 自己不设 CMAKE_BUILD_TYPE，题3 会以 -O0 编译（题1/题2 是 Release）。
+CMAKE_ARGS=(-DCMAKE_BUILD_TYPE=Release)
 PLAIN_ARGS=()
 
 # 在多个常见位置找 ONNX Runtime（解压即用的目录，特征文件是 include/onnxruntime_cxx_api.h）
@@ -80,9 +82,11 @@ else
     echo "        ⚠ 不启用 ORT 时，README 第三步的 ②（pose）会直接报错退出；①（bbox）不受影响。"
 fi
 
-if [[ -f /opt/MVS/include/MvCameraControl.h ]]; then
-    echo "[setup] 检测到海康 MVS SDK（/opt/MVS） → 启用 source:=hik 图像源"
-    CMAKE_ARGS+=(-DUSE_HIK_SDK=ON)
+# MVS 安装目录可用环境变量覆盖（与 check_env.sh、README 同一口径）
+MVS_DIR="${MVS_SDK_DIR:-/opt/MVS}"
+if [[ -f "$MVS_DIR/include/MvCameraControl.h" ]]; then
+    echo "[setup] 检测到海康 MVS SDK（$MVS_DIR） → 启用 source:=hik 图像源"
+    CMAKE_ARGS+=(-DUSE_HIK_SDK=ON "-DMVS_SDK_DIR=$MVS_DIR")
 fi
 
 # ---------- 3) 构建 ----------
@@ -101,15 +105,11 @@ cmake -S 02_tracker -B build/02_tracker -DCMAKE_BUILD_TYPE=Release "${PLAIN_ARGS
 cmake --build build/02_tracker -j"$JOBS"
 
 echo "[setup] 构建题3（ROS2 包 rm_armor_visualization）…"
-if [[ ${#CMAKE_ARGS[@]} -gt 0 ]]; then
-    colcon build --packages-up-to rm_armor_visualization --cmake-args "${CMAKE_ARGS[@]}"
-else
-    colcon build --packages-up-to rm_armor_visualization
-fi
+colcon build --packages-up-to rm_armor_visualization --cmake-args "${CMAKE_ARGS[@]}"
 
-if [[ -f /opt/MVS/include/MvCameraControl.h ]]; then
+if [[ -f "$MVS_DIR/include/MvCameraControl.h" ]]; then
     echo "[setup] 构建 04_hik 学习 demo…"
-    cmake -S 04_hik -B build/04_hik
+    cmake -S 04_hik -B build/04_hik -DMVS_SDK_DIR="$MVS_DIR"
     cmake --build build/04_hik -j"$JOBS"
 fi
 
@@ -126,7 +126,6 @@ fi
 ls -l compile_commands.json 01_detector/compile_commands.json 02_tracker/compile_commands.json 04_hik/compile_commands.json 2>/dev/null | sed 's/^/        /' || true
 
 # ---------- 5) 收尾：只提示，不启动 ----------
-source install/setup.bash
 echo
 echo "[setup] 构建完成，开关状态："
 grep -E "USE_ONNXRUNTIME|USE_HIK_SDK" build/rm_armor_visualization/CMakeCache.txt || true

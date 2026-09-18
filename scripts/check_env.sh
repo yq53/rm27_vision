@@ -106,7 +106,11 @@ fi
 title '[3/6] OpenCV（题1/题2 需要，题3 也需要）'
 
 if pkg-config --exists opencv4 2>/dev/null; then
-    ok "OpenCV C++：$(pkg-config --modversion opencv4)"
+    ok "OpenCV C++：$(pkg-config --modversion opencv4)（取自 $(pkg-config --variable=pcfiledir opencv4)）"
+    if [[ -f /usr/local/lib/pkgconfig/opencv4.pc && -f /usr/lib/x86_64-linux-gnu/pkgconfig/opencv4.pc ]]; then
+        hint "本机有两份 opencv4.pc。本项查的是 pkg-config，而构建用的是 CMake 的 find_package(OpenCV) ——"
+        hint "两套机制互相独立，可能各选一个版本；以 CMake 的为准（看 build/*/CMakeCache.txt 里的 OpenCV_DIR）"
+    fi
 else
     fail "找不到 OpenCV4 的 pkg-config 信息（opencv4.pc）"
     hint "sudo apt install libopencv-dev"

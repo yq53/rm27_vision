@@ -78,7 +78,7 @@ bash scripts/setup.sh
 > **文档自检**：改完 README / notes / log 后建议跑一次 `bash scripts/check_docs.sh` —— 它检查代码栅栏配平、
 > 代码块里没有会破坏粘贴的尖括号占位符、修订记录版本号升序、以及 `§` 与文件路径的交叉引用是否有效（退出码 0/1）。
 
-**海康相机模块也在覆盖范围内**：检测到 `/opt/MVS` 时，`setup.sh` 会
+**海康相机模块也在覆盖范围内**：检测到 MVS SDK（默认 `/opt/MVS`，装在别处用 `MVS_SDK_DIR=/你的/MVS bash scripts/setup.sh`）时，`setup.sh` 会
 ①给出题3 的节点打开 `USE_HIK_SDK`（也就是 `source:=hik` 图像源）、②顺带构建 `04_hik` 学习 demo。
 所以现场接入海康相机只需三步：**装 MVS 客户端（含 SDK）→ `data/camera.yaml` 填序列号 → `ros2 launch … source:=hik`**。
 （没装 MVS SDK 时这两步会自动跳过，`check_env.sh` 会在 [5/6] 明确提示。）
@@ -159,7 +159,7 @@ ros2 launch rm_armor_visualization armor_tracker.launch.py source:=hik \
 **预期效果**
 
 - **接上真机**：与 A 完全一样，只是画面来自相机实时流。构建需启用 MVS SDK——
-  `setup.sh` 检测到 `/opt/MVS` 会自动打开 `USE_HIK_SDK`（收尾会打印开关状态）。
+  `setup.sh` 检测到 MVS SDK（默认 `/opt/MVS`，可用 `MVS_SDK_DIR=` 指到别处）会自动打开 `USE_HIK_SDK`（收尾会打印开关状态）。
 - **像素格式自动适配**：`data/camera.yaml` 里的 `pixel_format` / `adc_bit_depth` / `trigger_mode` 会以
   "请求"形式发给相机（相机不支持时只警告、不中断）；相机实际输出什么格式，都由 `frameToBgr()` 统一转成 BGR
   （支持 `BGR8_Packed` / `RGB8_Packed` / `Mono8` / `BayerRG8`·`GR8`·`GB8`·`BG8`）。
@@ -288,16 +288,20 @@ cmake -S 01_detector -B build/01_detector -DCMAKE_BUILD_TYPE=Release && cmake --
 cmake -S 02_tracker  -B build/02_tracker  -DCMAKE_BUILD_TYPE=Release && cmake --build build/02_tracker  -j
 
 # B. 题3：ROS2 colcon（默认配置；不引入 ORT / MVS 依赖）
+#    -DCMAKE_BUILD_TYPE=Release 首次构建时不能省：colcon 自己不设构建类型，
+#    省掉的话题3 的节点会以 -O0 编译（题1/题2 一直是 -O3），每帧的检测+PnP+EKF 全部无优化
 source /opt/ros/humble/setup.bash
-colcon build --packages-up-to rm_armor_visualization
+colcon build --packages-up-to rm_armor_visualization \
+    --cmake-args -DCMAKE_BUILD_TYPE=Release
 source install/setup.bash
 
 # C. 额外启用四关键点模型（ONNX Runtime 后端）
 colcon build --packages-up-to rm_armor_visualization \
-    --cmake-args -DUSE_ONNXRUNTIME=ON -DONNXRUNTIME_DIR="$ORT_DIR"
+    --cmake-args -DCMAKE_BUILD_TYPE=Release -DUSE_ONNXRUNTIME=ON -DONNXRUNTIME_DIR="$ORT_DIR"
 
 # D. 额外启用海康相机（MVS SDK）
-colcon build --packages-up-to rm_armor_visualization --cmake-args -DUSE_HIK_SDK=ON
+colcon build --packages-up-to rm_armor_visualization \
+    --cmake-args -DCMAKE_BUILD_TYPE=Release -DUSE_HIK_SDK=ON
 
 # E. 04_hik 学习 demo（独立工程）
 cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
@@ -662,13 +666,16 @@ ros2 launch rm_armor_visualization armor_tracker.launch.py [参数:=值 ...]
 bash scripts/setup.sh                              # 环境 + 构建（自动探测 ONNX Runtime / MVS SDK）
 bash scripts/setup.sh --clean                      # 先清掉 build/ install/ log/ 再全量重建
 ORT_DIR=/your/onnxruntime bash scripts/setup.sh    # 手工指定 ORT 位置
+MVS_SDK_DIR=/your/MVS bash scripts/setup.sh        # 手工指定 MVS SDK 位置（默认 /opt/MVS）
 ```
 
 它依次做三件事：
 
 1. `source` ROS2 环境，并设好本工程需要的 `RMW_IMPLEMENTATION` 与 `ROS_LOG_DIR`；
-2. 构建题1、题2（普通 CMake）、题3（`colcon build`）、以及 04_hik 学习 demo；**探测到 ONNX Runtime
-   就把 `detector:=pose` 通路一起编进去**，探测到 MVS SDK 就编上 `source:=hik`；
+2. 构建题1、题2（普通 CMake，`Release`）、题3（`colcon build`，**显式传
+   `-DCMAKE_BUILD_TYPE=Release`** —— colcon 自己不设构建类型，漏掉的话题3 的节点会以 `-O0` 编译）、
+   以及 04_hik 学习 demo；**探测到 ONNX Runtime 就把 `detector:=pose` 通路一起编进去**，
+   探测到 MVS SDK 就编上 `source:=hik`；
 3. 打印开关状态（`USE_ONNXRUNTIME` / `USE_HIK_SDK`）与**下一步该跑的命令**（bbox 与 pose 各一条，都是 `data/demo.avi`）。
 
 想自己一步步敲也完全可以——等价的手工命令就是「构建」一节那几条，结果一样。
@@ -958,6 +965,7 @@ cmake -S 04_hik -B build/04_hik && cmake --build build/04_hik -j
 | v3.4 | 2026-09-15 | **参数改名**：`model_path` → `bbox_model_path`（与 `pose_model_path` 对称）——launch 参数、节点 `declare_parameter`、README 参数表三处同步，并按"给一个不存在的路径看节点是否报错"验证契约真的接上；FAQ 补一条"参数名不一致会静默用默认值"；`log.md` 新增 **§23**（launch 两阶段与 Substitution / 参数注入链与名字契约 / RMW 与 LD_LIBRARY_PATH / 编译链接加载与 `.so` 五级搜索顺序的概念梳理） |
 | v3.5 | 2026-09-15 | **行为改进**：EKF 的时间步长由名义帧率（`1 / fpsHint()` = 33.3 ms）改为**实测 dt**（`steady_clock` 真实间隔 + `[1 ms, 200 ms]` 夹取），并把 `ekf_.predict()` 移到读帧之前（读帧失败那帧不再丢时间步长）；实测真实间隔平均 **43.7 ms** → 原实现每帧少算约 30% 的时间；旧成员 `last_img_time_` 由此真正投入使用（`log.md §23.8`） |
 | v3.6 | 2026-09-17 | **行为改进 + 概念梳理**：题3 主节点补显式 `-Wl,-rpath,${MVS_SDK_DIR}/lib/64` —— `source:=hik` 时**不再依赖** `LD_LIBRARY_PATH`（实测 `install` 只剥掉 CMake 自动汇总的 RUNPATH 条目、显式 `-Wl,-rpath` 均保留），launch 那层保留为冗余兜底（`log.md §23.12`）；`log.md` §23 扩充 **§23.9–§23.11**：`add_subdirectory` 与"配置期当场执行"、ALL 集合与依赖图（澄清 `EXCLUDE_FROM_ALL` 只管"要不要"、链接才管"谁拉起谁"）、`ament_target_dependencies` 的查找顺序与"能接哪些包"的判断（更正 OpenCV 那处口径）、`install()` 与 `ament_package()` 的六项产出 |
+| v3.7 | 2026-09-18 | **构建口径修正**：`setup.sh` 给 colcon 补 `-DCMAKE_BUILD_TYPE=Release` —— 此前题3 的节点（交付物本身）以 **`-O0`** 编译，而题1/题2 与离线评测是 `-O3`；`setup.sh` 与 `check_env.sh` 统一支持 `MVS_SDK_DIR`（并传给 colcon 与 `04_hik`）；删掉 `setup.sh` 结尾对调用者 shell 无效的 `source install/setup.bash`；`check_env.sh` 的 OpenCV 一项改为打印 pkg-config 来处，并在两份 `opencv4.pc` 并存时提示"以 CMake 的 `find_package` 为准"（`log.md §23.13`） |
 
 ---
 

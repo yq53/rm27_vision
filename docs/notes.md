@@ -138,7 +138,8 @@
 | 改了参数名后行为"没变" | launch 传的参数名必须与节点 `declare_parameter` 的**完全一致**——不一致时节点**静默退回自己的默认值**（实测：`detector` 拼成 `detectorr` 无任何警告）。改成"给一个不存在的路径看节点是否报错"最能把契约验证出来 | `log.md §23.2` |
 | 报 `libMvCameraControl.so => not found` | 先分清是哪个程序：`04_hik` 与题3 主节点都有 RUNPATH（v3.6 起），**都不需要**设；launch hik 分支仍会自动设一层作兜底 | `log.md §19.11`、§23.12 |
 | 想搞清 launch/参数/`.so` 加载机制 | 见 `log.md §23`：两阶段与 Substitution、`OpaqueFunction`、参数注入链与名字契约、RMW/DDS、`LD_LIBRARY_PATH`、`.o/.a/.so` 与 `ld.so` 五级搜索顺序 | `log.md §23` |
-| 想搞清 CMake 构建系统本身 | 见 `log.md §23.9`–§23.12：`add_subdirectory` 的"配置期当场执行"、`EXCLUDE_FROM_ALL` 与 ALL 集合、依赖图与后向闭包、`ament_target_dependencies` 的查找顺序与"能接哪些包"、`install()` 与 `ament_package()` 的产出、install 时 RPATH 被剥 | `log.md §23.9` |
+| 想搞清 CMake 构建系统本身 | 见 `log.md §23.9`–§23.13：`add_subdirectory` 的"配置期当场执行"、`EXCLUDE_FROM_ALL` 与 ALL 集合、依赖图与后向闭包、`ament_target_dependencies` 的查找顺序与"能接哪些包"、`install()` 与 `ament_package()` 的产出、install 时 RPATH 被剥、题3 曾以 `-O0` 编译的修正 | `log.md §23.9` |
+| 题3 节点比预期慢 | 先看构建类型：`grep CMAKE_BUILD_TYPE build/rm_armor_visualization/CMakeCache.txt` 应为 `Release`（v3.7 之前是空 = `-O0`，题1/题2 与 `eval_demo` 一直是 `-O3`） | `log.md §23.13` |
 
 ## 7. 负结果与已知局限
 
