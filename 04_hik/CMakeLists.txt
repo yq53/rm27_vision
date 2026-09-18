@@ -41,6 +41,8 @@ target_include_directories(hik_grab PRIVATE ${MVS_INCLUDE_DIR})
 target_link_directories(hik_grab PRIVATE ${MVS_LIB_DIR})
 target_link_libraries(hik_grab PRIVATE MvCameraControl ${OpenCV_LIBS})
 
-# 运行提示：程序运行时需要能"找到" .so（动态库是运行时才加载的）
-#   cmake 之外执行: export LD_LIBRARY_PATH=/opt/MVS/lib/64:$LD_LIBRARY_PATH
+# 运行提示：本工程没有 install()，CMake 会自动把 ${MVS_LIB_DIR} 写进可执行文件的 RUNPATH，
+# 所以直接运行即可，不需要 export LD_LIBRARY_PATH。
+# （题3 是 ROS 包、带 install()，install 时自动 RUNPATH 会被剥掉，那边才需要显式 -Wl,-rpath。）
+# 验证：readelf -d build/04_hik/hik_grab | grep -i runpath
 message(STATUS "MVS SDK: include=${MVS_INCLUDE_DIR}  lib=${MVS_LIB_DIR}")

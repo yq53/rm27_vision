@@ -1816,6 +1816,23 @@ source 的结果不会传回调用者的终端 → 该行对用户毫无作用�
 本机**恰好一致**（`OpenCV_DIR=/usr/local/lib/cmake/opencv4`，`pkg-config --modversion opencv4` = 4.13.0），
 但理论上可以不一致。现在自检会打印 `.pc` 的来处，并在检测到两份 `.pc` 并存时提示"以 CMake 的为准"。
 
+**⑤ `04_hik/CMakeLists.txt` 里一条过时的运行提示（同日追加）**
+
+原文写"程序运行时需要能'找到' .so：`export LD_LIBRARY_PATH=/opt/MVS/lib/64:$LD_LIBRARY_PATH`"——
+**实测不需要**：`build/04_hik/hik_grab` 的 RUNPATH 本来就含 `/opt/MVS/lib/64`。
+
+规律一句话：**CMake 会自动把"链接时用过的库目录"写进 RUNPATH，而只有 `install()` 会把它剥掉。**
+`01/02/04` 都没有 `install()`（`grep -l "install(" */CMakeLists.txt` 只命中 03），所以自动 RUNPATH 一直在；
+题3 有 `install()` → 被剥 → 才需要显式 `-Wl,-rpath`（就是 §23.12 做的事）。
+**"要不要设 `LD_LIBRARY_PATH`"跟 MVS 毫无关系，是"这个工程 install 不 install"的问题**——README / `notes.md`
+在 v3.3 已按实测更正过，但这条 CMakeLists 注释当时漏改了。现已改为按 RUNPATH 表述，并附 `readelf` 验证命令。
+
+**⑥ 删掉 `04_hik/build/` 陈旧副本（同日追加）**
+
+`04_hik/` 下曾直接 cmake 过一次（`build/` 子目录，2026-09-12 的产物），后来 `setup.sh` 改用仓库根的
+`build/04_hik`（2026-09-13 起），两个目录并存。该目录被 `.gitignore` 的 `build/` 规则忽略、内容全部可重建，
+且 `04_hik/compile_commands.json` 软链指向的是 `../build/04_hik/`、不是它 → 删除无影响。
+
 **验收（实测）**
 
 ```
@@ -1825,6 +1842,11 @@ bash scripts/check_env.sh    → 退出码 0；OpenCV 那行打印 "4.13.0（取
 build/rm_armor_visualization/CMakeCache.txt   CMAKE_BUILD_TYPE:STRING=Release
 题3 主节点编译标志                              ['-O3', '-DNDEBUG']   ← 改前为空
 armor_detector.cpp                            ['-O3']
+
+readelf -d build/04_hik/hik_grab → RUNPATH = /opt/MVS/lib/64:/usr/local/lib
+env -u LD_LIBRARY_PATH ./build/04_hik/{hik_probe,hik_open,hik_grab}
+  → 三个程序都打印 "MV_CC_Initialize 成功"、发现 0 台相机、退出码 0   ← 无需 LD_LIBRARY_PATH
+rm -rf 04_hik/build 后重新 cmake -S 04_hik -B build/04_hik → 三个目标全部构建成功
 
 ros2 launch rm_armor_visualization armor_tracker.launch.py print_state:=true
   → 节点正常检测并发布，armor_state_printer 持续打印 d=… pos=… v=…
